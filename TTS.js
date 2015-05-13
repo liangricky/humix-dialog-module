@@ -6,7 +6,7 @@ var execSync = require('child_process').execSync;
 var soap = require('soap');
 var crypto = require('crypto');
 
-var voice_path = "./voice/";
+var voice_path = "./controls/humix-sense-speech/voice/";
 var url = 'http://tts.itri.org.tw/TTSService/Soap_1_3.php?wsdl';
 
 
