@@ -4,6 +4,7 @@ var nats = require('nats').connect();
 var exec = require('child_process').exec;
 var execSync = require('child_process').execSync;
 var soap = require('soap');
+var crypto = require('crypto');
 
 var voice_path = "./voice/";
 var url = 'http://tts.itri.org.tw/TTSService/Soap_1_3.php?wsdl';
@@ -11,7 +12,7 @@ var url = 'http://tts.itri.org.tw/TTSService/Soap_1_3.php?wsdl';
 
 function puts(error, stdout, stderr) {sys.puts(stdout)}
 
-function convertText(text, callback) {
+function convertText(text, hash, callback) {
     var args = {
         accountID: 'richchou',
         password: 'zaq12wsx',
@@ -30,7 +31,7 @@ function convertText(text, callback) {
             var id = result.Result.$value.split('&')[2];
             if (id) {
                 console.log('get id: '+id);
-                callback(null, id);
+                callback(null, id, hash);
             } else {
                 var error = 'failed to convert text!';
                 console.log(error);
@@ -69,19 +70,32 @@ function getConvertStatus(id, callback) {
     });
 }
 
+var retry = 0;
 function download (id) {
-
+    retry++;
     console.log(id+ " " +" download" );
     getConvertStatus(id, function(err, result) {
-        if (err) { console.log('err: '+err); }
+        if (err) 
+        { 
+            console.log('err: '+err); 
+            if (retry < 3)
+            {
+               console.log("retry " + retry);
+               setTimeout(download, 2000, id);
+            }
+        }
+        else 
+        {
            var wav_file = voice_path + "text/" + result + ".wav";
            console.log('Play wav file: ' + wav_file);
            execSync("aplay "+ wav_file, null);
+        }
     });
 }
 
 
 var msg = '';
+var wavehash = new Object();
 // subscribe events
 nats.subscribe('humix.sense.speech.command', function(msg) {
    console.log('Received a message: ' + msg);
@@ -97,18 +111,29 @@ nats.subscribe('humix.sense.speech.command', function(msg) {
            console.log('Play wav file: ' + wav_file);
            break;
        case "text":
-           convertText(speech_command.value, function(err, id) {
+           var hash = crypto.createHash('md5').update(speech_command.value).digest('hex');
+           console.log ("hash value: " + hash);
+           if ( wavehash.hasOwnProperty(hash))
+           {
+               var wav_file = voice_path + "text/" + wavehash[hash] + ".wav";
+               console.log('Play hash wav file: ' +  wav_file);
+               execSync("aplay "+ wav_file, null);
+            }
+            else 
+            {
+               console.log("hash not found");
+               convertText(speech_command.value, hash, function(err, id, hashvalue) {
                if (err) { console.log(err); }
-               setTimeout(download, 7000, id);
+               else
+               {
+                   wavehash[hashvalue] = id;
+                   retry = 0;
+                   setTimeout(download, 1000, id);
+               }
             });
+              
+            }
            break;
        
    }
-  /* 
-   if (speech_command.sensor == "temp" ||
-       speech_command.sensor == "humid" ||
-       speech_command.sensor == "age" )
-   {
-   }
-  */ 
 });
