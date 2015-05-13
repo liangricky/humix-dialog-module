@@ -98,42 +98,30 @@ var msg = '';
 var wavehash = new Object();
 // subscribe events
 nats.subscribe('humix.sense.speech.command', function(msg) {
-   console.log('Received a message: ' + msg);
-   speech_command = JSON.parse(msg);
-   var wav_file = '';
-   switch (speech_command.sensor)
-   {
-       case "temp":
-       case "humid":
-       case "age":
-           wav_file = voice_path + speech_command.sensor + "/" + speech_command.value + ".wav";
-           exec("aplay "+ wav_file, null);
-           console.log('Play wav file: ' + wav_file);
-           break;
-       case "text":
-           var hash = crypto.createHash('md5').update(speech_command.value).digest('hex');
-           console.log ("hash value: " + hash);
-           if ( wavehash.hasOwnProperty(hash))
-           {
-               var wav_file = voice_path + "text/" + wavehash[hash] + ".wav";
-               console.log('Play hash wav file: ' +  wav_file);
-               execSync("aplay "+ wav_file, null);
+    console.log('Received a message: ' + msg);
+    var text = JSON.parse(msg).text || undefined,
+        wav_file = '';
+
+    if (!text) {
+        return console.error('Missing property: msg.text');
+    }
+
+    var hash = crypto.createHash('md5').update(text).digest('hex');
+    console.log ("hash value: " + hash);
+    if (wavehash.hasOwnProperty(hash)) {
+        var wav_file = voice_path + "text/" + wavehash[hash] + ".wav";
+        console.log('Play hash wav file: ' +  wav_file);
+        execSync("aplay "+ wav_file, null);
+    }
+    else {
+        console.log("hash not found");
+        convertText(text, hash, function(err, id, hashvalue) {
+            if (err) { console.log(err); }
+            else {
+                wavehash[hashvalue] = id;
+                retry = 0;
+                setTimeout(download, 1000, id);
             }
-            else 
-            {
-               console.log("hash not found");
-               convertText(speech_command.value, hash, function(err, id, hashvalue) {
-               if (err) { console.log(err); }
-               else
-               {
-                   wavehash[hashvalue] = id;
-                   retry = 0;
-                   setTimeout(download, 1000, id);
-               }
-            });
-              
-            }
-           break;
-       
-   }
+        });
+    }
 });
