@@ -1,4 +1,5 @@
 var console = require('console');
+var config = require('./config');
 var sys = require('sys');
 var nats = require('nats').connect();
 var exec = require('child_process').exec;
@@ -124,4 +125,43 @@ nats.subscribe('humix.sense.speech.command', function(msg) {
             }
         });
     }
+});
+
+//use child process to handle speech to text
+var speechProc = exec(config.speechCmd + ' ' + config.args.join(' '), function () {
+});
+
+var commandRE = /---=(.*)=---/;
+var INIT     = 0,
+    READY    = 1,
+    WAIT4CMD = 2,
+    LISTEN   = 3,
+    COMMAND  = 4;
+
+
+var state = READY;
+
+speechProc.stdout.on('data', function (data) {
+    var data = data.trim();
+    if ( data.indexOf('keyword HUMIX found') != -1 ) {
+        state = WAIT4CMD;
+        execSync("aplay "+ config.responses[0], { 'stdio' : [ 'ignore', 'ignore', 'ignore' ]});
+    } else if ( commandRE.test(data) ) {
+        console.error('command found:' + data.trim());
+    } else if ( data.indexOf('Listening the command') != -1 && state == WAIT4CMD) {
+        state = LISTEN;
+    } else if ( data.indexOf('READY') && state == LISTEN) {
+        state = READY;
+        execSync("aplay "+ config.repeats[1], { 'stdio' : [ 'ignore', 'ignore', 'ignore' ]});
+    } else {
+        state = READY;
+    }
+});
+
+speechProc.on('close', function(code) {
+    console.error('speech proc finished with code:' + code);
+});
+
+speechProc.on('error', function (error) {
+    console.error(error);
 });

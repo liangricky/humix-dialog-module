@@ -290,7 +290,7 @@ static void
 recognize_from_microphone()
 {
     ad_rec_t *ad;
-    int16 adbuf[2048];
+    int16 adbuf[4096];
     uint8 in_speech; //utt_started, in_speech;
     int32 k;
     char const *hyp;
@@ -312,7 +312,7 @@ recognize_from_microphone()
     printf("READY....\n");
 
     for (;;) {
-        if ((k = ad_read(ad, adbuf, 2048)) < 0)
+        if ((k = ad_read(ad, adbuf, 4096)) < 0)
             E_FATAL("Failed to read audio\n");
         ps_process_raw(ps, adbuf, k, FALSE, FALSE);
         in_speech = ps_get_in_speech(ps);
@@ -321,7 +321,7 @@ recognize_from_microphone()
         case kReady:
             if ( in_speech ) {
                 state = kKeyword;
-                printf("Listening Keyword... %d\n", state);
+                printf("Listening Keyword... \n");
             }
             break;
         case kKeyword:
@@ -334,6 +334,7 @@ recognize_from_microphone()
                 if (hyp != NULL && strcmp("HUMIX", hyp) == 0) {
                     state = kWaitCommand;
                     printf("keyword HUMIX found\n");
+                    fflush(stdout);
                     printf("Waiting for a command...\n");
                     //also start recording
                     recordPID = sStartRecord();
@@ -351,7 +352,7 @@ recognize_from_microphone()
                 state = kCommand;
             } else {
                 //increase waiting count;
-                if (++waitCount > 30) {
+                if (++waitCount > 40) {
                     waitCount = 0;
                     state = kReady;
                     //stop the recording as well
@@ -425,8 +426,8 @@ main(int argc, char *argv[])
     //get language from arg
     lang = cmd_ln_str_r(config, "-lang");
 
-
-
+    //disable stdout buffer
+    setbuf(stdout, NULL);
     if (cmd_ln_str_r(config, "-infile") != NULL) {
         recognize_from_file();
     } else if (cmd_ln_boolean_r(config, "-inmic")) {
