@@ -58,6 +58,7 @@
 #include <sys/types.h>
 #include <signal.h>
 #include <errno.h>
+#include <sys/wait.h>
 
 #if defined(_WIN32) && !defined(__CYGWIN__)
 #include <windows.h>
@@ -93,12 +94,23 @@ static const arg_t cont_args_def[] = {
      ARG_BOOLEAN,
      "no",
      "Print word times in file transcription."},
+    {"-cmdproc",
+     ARG_STRING,
+     "/home/pi/humix/humix-sense/controls/humix-sense-speech/processcmd.sh",
+     "command processor."},
+    {"-lang",
+     ARG_STRING,
+     "zh-tw",
+     "language locale."},
+
     CMDLN_EMPTY_OPTION
 };
 
 static ps_decoder_t *ps;
 static cmd_ln_t *config;
 static FILE *rawfd;
+static char const* cmdproc = NULL;
+static char const* lang = NULL;
 
 static void
 print_word_times()
@@ -245,7 +257,7 @@ static int sStartRecord() {
         return -1;
     }
     if ( pid == 0) {
-        int rev = execl("/usr/bin/arecord", "/usr/bin/arecord", "-f", "cd", "-r", "16000", "-t", "wav", "/home/yhwang/test.wav", (char*) NULL);
+        int rev = execl("/usr/bin/arecord", "/usr/bin/arecord", "-f", "cd", "-r", "16000", "-t", "wav", "/dev/shm/test.wav", (char*) NULL);
         if ( rev == -1 ) {
             printf("fork error:%s\n", strerror(errno));
         }
@@ -260,7 +272,7 @@ static int sProcessCommand() {
         return -1;
     }
     if ( pid == 0) {
-        int rev = execl("/home/yhwang/humix/processcmd.sh", "processcmd.sh", "/home/yhwang/test.wav", "/home/yhwang/test.flac", "zh-tw", (char*) NULL);
+        int rev = execl(cmdproc, "processcmd.sh", "/dev/shm/test.wav", "/dev/shm/test.flac", lang, (char*) NULL);
         if ( rev == -1 ) {
             printf("fork error:%s\n", strerror(errno));
         }
@@ -279,7 +291,7 @@ recognize_from_microphone()
 {
     ad_rec_t *ad;
     int16 adbuf[2048];
-    uint8 utt_started, in_speech;
+    uint8 in_speech; //utt_started, in_speech;
     int32 k;
     char const *hyp;
     state = kReady;
@@ -296,7 +308,7 @@ recognize_from_microphone()
 
     if (ps_start_utt(ps) < 0)
         E_FATAL("Failed to start utterance\n");
-    utt_started = FALSE;
+    //utt_started = FALSE;
     printf("READY....\n");
 
     for (;;) {
@@ -408,6 +420,12 @@ main(int argc, char *argv[])
     }
 
     E_INFO("%s COMPILED ON: %s, AT: %s\n\n", argv[0], __DATE__, __TIME__);
+    //get processcmd.sh from arg
+    cmdproc = cmd_ln_str_r(config, "-cmdproc");
+    //get language from arg
+    lang = cmd_ln_str_r(config, "-lang");
+
+
 
     if (cmd_ln_str_r(config, "-infile") != NULL) {
         recognize_from_file();
