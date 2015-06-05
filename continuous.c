@@ -266,6 +266,22 @@ static int sStartRecord() {
     return pid;
 }
 
+static int sAplay(const char* file) {
+    pid_t pid = fork();
+    if ( pid < 0) {
+        return -1;
+    }
+    if ( pid == 0) {
+        int rev = execl("/usr/bin/aplay", "/usr/bin/aplay", file ,(char*) NULL);
+        if ( rev == -1 ) {
+            printf("fork error:%s\n", strerror(errno));
+        }
+        _exit(1);
+    }
+    return pid;
+}
+
+
 static int sProcessCommand() {
     pid_t pid = fork();
     if ( pid < 0) {
@@ -335,6 +351,7 @@ recognize_from_microphone()
                     state = kWaitCommand;
                     printf("keyword HUMIX found\n");
                     fflush(stdout);
+                    sAplay("/home/pi/humix/humix-sense/controls/humix-sense-speech/voice/interlude/pleasesay.wav");
                     printf("Waiting for a command...\n");
                     //also start recording
                     recordPID = sStartRecord();
@@ -377,10 +394,7 @@ recognize_from_microphone()
                 waitpid(recordPID, &pids, 0);
                 recordPID = 0;
                 ps_end_utt(ps);
-                /*hyp = ps_get_hyp(ps, NULL );
-                if (hyp != NULL && strcmp("HUMIX", hyp) == 0) {
-                    printf("Got HUMIX command....\n");
-                }*/
+                sAplay("/home/pi/humix/humix-sense/controls/humix-sense-speech/voice/interlude/process.wav");
                 sProcessCommand();
                 if (ps_start_utt(ps) < 0)
                     E_FATAL("Failed to start utterance\n");

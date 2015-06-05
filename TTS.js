@@ -132,29 +132,12 @@ var speechProc = exec(config.speechCmd + ' ' + config.args.join(' '), function (
 });
 
 var commandRE = /---=(.*)=---/;
-var INIT     = 0,
-    READY    = 1,
-    WAIT4CMD = 2,
-    LISTEN   = 3,
-    COMMAND  = 4;
-
-
-var state = READY;
+var prefix = '---=';
 
 speechProc.stdout.on('data', function (data) {
     var data = data.trim();
-    if ( data.indexOf('keyword HUMIX found') != -1 ) {
-        state = WAIT4CMD;
-        execSync("aplay "+ config.responses[0], { 'stdio' : [ 'ignore', 'ignore', 'ignore' ]});
-    } else if ( commandRE.test(data) ) {
-        console.error('command found:' + data.trim());
-    } else if ( data.indexOf('Listening the command') != -1 && state == WAIT4CMD) {
-        state = LISTEN;
-    } else if ( data.indexOf('READY') && state == LISTEN) {
-        state = READY;
-        execSync("aplay "+ config.repeats[1], { 'stdio' : [ 'ignore', 'ignore', 'ignore' ]});
-    } else {
-        state = READY;
+    if ( commandRE.test(data) ) {
+        console.error('command found:' + data.substr(prefix.length, data.length - (prefix.length * 2));
     }
 });
 
