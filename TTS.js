@@ -137,7 +137,8 @@ var prefix = '---=';
 speechProc.stdout.on('data', function (data) {
     var data = data.trim();
     if ( commandRE.test(data) ) {
-        console.error('command found:' + data.substr(prefix.length, data.length - (prefix.length * 2));
+        nats.publish('humix.sense.speech.event', data.substr(prefix.length, data.length- (prefix.length * 2)));
+        console.error('command found:' + data.substr(prefix.length, data.length - (prefix.length * 2)));
     }
 });
 
