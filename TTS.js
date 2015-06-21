@@ -79,7 +79,7 @@ function download (id) {
         if (err) 
         { 
             console.log('err: '+err); 
-            if (retry < 3)
+            if (retry < 10)
             {
                console.log("retry " + retry);
                setTimeout(download, 2000, id);
@@ -132,7 +132,7 @@ var speechProc = exec(config.speechCmd + ' ' + config.args.join(' '), function (
 });
 
 var commandRE = /---=(.*)=---/;
-var prefix = '---=';
+var prefix = '---="';
 
 speechProc.stdout.on('data', function (data) {
     var data = data.trim();
