@@ -4,9 +4,10 @@ OBJ_SPHINXBASE=deps/sphinxbase-$(SPHINXBASE_VER)/src/libsphinxbase/.libs/libsphi
 OBJ_SPHINXAD=deps/sphinxbase-$(SPHINXBASE_VER)/src/libsphinxad/.libs/libsphinxad.a
 OBJ_POCKETSPHINX=deps/pocketsphinx-$(POCKETSPHINX_VER)/src/libpocketsphinx/.libs/libpocketsphinx.a
 OBJ_HUMIXSPEECH=humix-speech.o
-CFLAGS=-g -O2 -Wall
+DEBUG=#-g
+CFLAGS=$(DEBUG) -O2 -Wall
 
-all: sphinxbase sphinxad pocketsphinx humix-speech
+all: humix-speech
 
 
 .PHONY: sphinxbase 
@@ -26,7 +27,7 @@ humix-speech: $(OBJ_HUMIXSPEECH)
 		-o $@ -Wl,--start-group $(OBJ_HUMIXSPEECH) $(OBJ_SPHINXBASE) $(OBJ_SPHINXAD) $(OBJ_POCKETSPHINX) -Wl,--end-group \
 		-lasound -lm
 
-$(OBJ_HUMIXSPEECH): sphinxbase sphinxad pocketsphinx
+$(OBJ_HUMIXSPEECH): sphinxbase sphinxad pocketsphinx humix-speech.c
 	gcc $(CFLAGS) -I. -Ideps/sphinxbase-$(SPHINXBASE_VER)/include -Ideps/pocketsphinx-$(POCKETSPHINX_VER)/include -lasound -lpthread -lm -c -o $@ humix-speech.c
 
 $(OBJ_SPHINXBASE): deps
