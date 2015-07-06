@@ -22,10 +22,7 @@ pocketsphinx: $(OBJ_POCKETSPHINX)
 #
 humix-speech: $(OBJ_HUMIXSPEECH)
 	gcc $(CFLAGS) \
-		-Ldeps/sphinxbase-$(SPHINXBASE_VER)/src/libsphinxbase/.libs \
-		-Ldeps/sphinxbase-$(SPHINXBASE_VER)/src/libsphinxad/.libs \
-		-Ldeps/pocketsphinx-$(POCKETSPHINX_VER)/src/libpocketsphinx/.libs \
-		-rdynamic -Wl,--whole-archive $(OBJ_SPHINXBASE) $(OBJ_SPHINXAD) $(OBJ_POCKETSPHINX) -Wl,--no-whole-archive  \
+		-Wl,--whole-archive $(OBJ_SPHINXBASE) $(OBJ_SPHINXAD) $(OBJ_POCKETSPHINX) -Wl,--no-whole-archive  \
 		-o $@ -Wl,--start-group $(OBJ_HUMIXSPEECH) $(OBJ_SPHINXBASE) $(OBJ_SPHINXAD) $(OBJ_POCKETSPHINX) -Wl,--end-group \
 		-lasound -lm
 
