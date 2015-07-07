@@ -19,12 +19,10 @@ sphinxad: $(OBJ_SPHINXAD)
 .PHONY: pocketsphinx
 pocketsphinx: $(OBJ_POCKETSPHINX)
 
-#		-Wl,--start-group $(OBJ_SPHINXBASE) $(OBJ_SPHINXAD) $(OBJ_POCKETSPHINX) -lasound -lm -Wl,--end-group \
-#
 humix-speech: $(OBJ_HUMIXSPEECH)
 	gcc $(CFLAGS) \
 		-Wl,--whole-archive $(OBJ_SPHINXBASE) $(OBJ_SPHINXAD) $(OBJ_POCKETSPHINX) -Wl,--no-whole-archive  \
-		-o $@ -Wl,--start-group $(OBJ_HUMIXSPEECH) $(OBJ_SPHINXBASE) $(OBJ_SPHINXAD) $(OBJ_POCKETSPHINX) -Wl,--end-group \
+		-o $@ $(OBJ_HUMIXSPEECH) $(OBJ_SPHINXBASE) $(OBJ_SPHINXAD) $(OBJ_POCKETSPHINX) \
 		-lasound -lm
 
 $(OBJ_HUMIXSPEECH): sphinxbase sphinxad pocketsphinx humix-speech.c
