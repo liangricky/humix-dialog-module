@@ -8,24 +8,14 @@ DEBUG=#-g
 CFLAGS=$(DEBUG) -O2 -Wall
 
 all: humix-speech
-
-
-.PHONY: sphinxbase 
-sphinxbase:  $(OBJ_SPHINXBASE)
-
-.PHONY: sphinxad
-sphinxad: $(OBJ_SPHINXAD)
-
-.PHONY: pocketsphinx
-pocketsphinx: $(OBJ_POCKETSPHINX)
-
+#-Wl,--start-group xxxx.a. xxxx.a xxx.a -Wl,--end-group is used to resolve the circular dependencies
 humix-speech: $(OBJ_HUMIXSPEECH)
 	gcc $(CFLAGS) \
 		-Wl,--whole-archive $(OBJ_SPHINXBASE) $(OBJ_SPHINXAD) $(OBJ_POCKETSPHINX) -Wl,--no-whole-archive  \
 		-o $@ $(OBJ_HUMIXSPEECH) $(OBJ_SPHINXBASE) $(OBJ_SPHINXAD) $(OBJ_POCKETSPHINX) \
 		-lasound -lm
 
-$(OBJ_HUMIXSPEECH): sphinxbase sphinxad pocketsphinx humix-speech.c
+$(OBJ_HUMIXSPEECH): $(OBJ_SPHINXBASE) $(OBJ_SPHINXAD) $(OBJ_POCKETSPHINX) humix-speech.c
 	gcc $(CFLAGS) -I. -Ideps/sphinxbase-$(SPHINXBASE_VER)/include -Ideps/pocketsphinx-$(POCKETSPHINX_VER)/include -lasound -lpthread -lm -c -o $@ humix-speech.c
 
 $(OBJ_SPHINXBASE): deps
@@ -35,7 +25,7 @@ $(OBJ_SPHINXBASE): deps
 
 $(OBJ_SPHINXAD): $(OBJ_SPHINXBASE)
 
-$(OBJ_POCKETSPHINX): deps
+$(OBJ_POCKETSPHINX): deps $(OBJ_SPHINXBASE)
 	tar -xf pocketsphinx-$(POCKETSPHINX_VER).tar.gz -C deps
 	cd deps/pocketsphinx-$(POCKETSPHINX_VER); ./configure
 	make -C deps/pocketsphinx-$(POCKETSPHINX_VER) all
