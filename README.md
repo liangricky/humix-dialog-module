@@ -1,7 +1,8 @@
 # humix-sense-speech
-Using text-to-speech API to SPEAK
+speech-to-text and text-to-speech enabling project for Humix
 
 # dependencies:
+- nodejs > 0.11
 - packages
     - sudo apt-get install bison
     - sudo apt-get install libasound2-dev
