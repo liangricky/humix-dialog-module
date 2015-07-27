@@ -178,15 +178,17 @@ static int sConnect2Node(const char *path)
 static int sGetAplayCommand(int fd, char* buff, ssize_t len) {
     char msgLenBuff[4];
     uint32_t* msgLen;
-    ssize_t readLen = read(fd, msgLenBuff, 4);
-    if ( readLen == 4 ) {
-        msgLen = (uint32_t*) msgLenBuff;
-        char payload[*msgLen + 1];
-        readLen = read(fd, payload, *msgLen);
-        if ( readLen == *msgLen ) {
-            payload[*msgLen] = 0;
-            strlcpy(buff, payload + 1, len);
-            return 1;
+    if ( fd > 0 ) {
+        ssize_t readLen = read(fd, msgLenBuff, 4);
+        if ( readLen == 4 ) {
+            msgLen = (uint32_t*) msgLenBuff;
+            char payload[*msgLen + 1];
+            readLen = read(fd, payload, *msgLen);
+            if ( readLen == *msgLen ) {
+                payload[*msgLen] = 0;
+                strlcpy(buff, payload + 1, len);
+                return 1;
+            }
         }
     }
     return 0;
@@ -278,7 +280,7 @@ recognize_from_microphone()
     char aplayCmd[1024];
     int nodeFD = sConnect2Node("/tmp/humix-speech-socket");
     if ( nodeFD == -1 ) {
-        E_FATAL("Failed to open connect to node\n");
+        printf("Failed to open connect to node\n");
     }
 
 
