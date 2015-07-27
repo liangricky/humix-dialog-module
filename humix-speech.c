@@ -6,6 +6,12 @@
 #include <signal.h>
 #include <errno.h>
 #include <sys/wait.h>
+#include <poll.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <fcntl.h>
+#include <stdint.h>
+
 
 #include <sys/select.h>
 #include <sphinxbase/err.h>
@@ -51,6 +57,14 @@ static const arg_t cont_args_def[] = {
     CMDLN_EMPTY_OPTION
 };
 
+typedef enum {
+    kReady,
+    kKeyword,
+    kWaitCommand,
+    kCommand
+} State;
+
+static State state;
 static ps_decoder_t *ps;
 static cmd_ln_t *config;
 static char const* cmdproc = NULL;
@@ -71,25 +85,6 @@ sleep_msec(int32 ms)
 
     select(0, NULL, NULL, NULL, &tmo);
 }
-
-/*
- * Main utterance processing loop:
- *     for (;;) {
- *        start utterance and wait for speech to process
- *        decoding till end-of-utterance silence will be detected
- *        print utterance result;
- *     }
- */
-
-
-typedef enum {
-    kReady,
-    kKeyword,
-    kWaitCommand,
-    kCommand
-} State;
-
-static State state;
 
 static int sStartRecord() {
     pid_t pid = fork();
@@ -120,6 +115,82 @@ static int sStartRecord() {
     }
     return pid;
 }*/
+
+static size_t
+strlcpy(char *dst, const char *src, size_t siz)
+{
+    register char *d = dst;
+    register const char *s = src;
+    register size_t n = siz;
+
+    /* Copy as many bytes as will fit */
+    if (n != 0 && --n != 0) {
+            do {
+                        if ((*d++ = *s++) == 0)
+                            break;
+                    } while (--n != 0);
+        }
+
+    /* Not enough room in dst, add NUL and traverse rest of src */
+    if (n == 0) {
+            if (siz != 0)
+                *d = '\0';      /* NUL-terminate dst */
+            while (*s++)
+                ;
+        }
+
+    return(s - src - 1);    /* count does not include NUL */
+}
+
+/*
+ * connect to nodejs and use this channel to get aplay command
+ */
+static int sConnect2Node(const char *path)
+{
+    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (fd == -1) return -1;
+
+    int flags = fcntl (fd, F_GETFL);
+    fcntl(fd, F_SETFL, flags | O_NONBLOCK);//non-blocking
+
+    struct sockaddr_un unaddr;
+    unaddr.sun_family = AF_UNIX;
+    strlcpy(unaddr.sun_path, path, sizeof(unaddr.sun_path));
+
+    int attempts = 10;
+    while (connect(fd, (struct sockaddr*)&unaddr, sizeof(unaddr)) < 0)
+    {
+        if ((attempts-- > 0) &&
+          (errno == ENOENT || errno == EAGAIN))
+        {
+            struct pollfd pfd = { fd, POLLIN | POLLOUT, 0 };
+            poll(&pfd, 1, 1 /* 1 ms */);
+            if (!(pfd.revents & POLLERR))
+                continue;
+        }
+        close(fd);
+        return -1;
+    }
+    
+    return fd;
+}
+
+static int sGetAplayCommand(int fd, char* buff, ssize_t len) {
+    char msgLenBuff[4];
+    uint32_t* msgLen;
+    ssize_t readLen = read(fd, msgLenBuff, 4);
+    if ( readLen == 4 ) {
+        msgLen = (uint32_t*) msgLenBuff;
+        char payload[*msgLen + 1];
+        readLen = read(fd, payload, *msgLen);
+        if ( readLen == *msgLen ) {
+            payload[*msgLen] = 0;
+            strlcpy(buff, payload + 1, len);
+            return 1;
+        }
+    }
+    return 0;
+}
 
 static int sAplayWait(const char* file) {
     pid_t pid = fork();
@@ -177,7 +248,7 @@ static int sProcessCommand(char* msg, int len) {
     return status;
 }
 
-static int isBye(const char* msg) {
+/*static int isBye(const char* msg) {
     static char byebye[] = {0xe6, 0x8b, 0x9c, 0xe6, 0x8b, 0x9c, 0};
     static char byebye2[] = {0xe6, 0x8e, 0xb0, 0xe6, 0x8e, 0xb0, 0};
     if( msg ) {
@@ -190,7 +261,7 @@ static int isBye(const char* msg) {
         }
     }
     return 0;
-}
+}*/
 
 static void
 recognize_from_microphone()
@@ -204,6 +275,11 @@ recognize_from_microphone()
     int waitCount = 0;
     pid_t recordPID = 0;
     int humixCount = 0;
+    char aplayCmd[1024];
+    int nodeFD = sConnect2Node("/tmp/humix-speech-socket");
+    if ( nodeFD == -1 ) {
+        E_FATAL("Failed to open connect to node\n");
+    }
 
 
     if ((ad = ad_open_dev(cmd_ln_str_r(config, "-adcdev"),
@@ -221,6 +297,17 @@ recognize_from_microphone()
     for (;;) {
         if ((k = ad_read(ad, adbuf, 4096)) < 0)
             E_FATAL("Failed to read audio\n");
+
+        //read data from rec, we need to check if there is any aplay request from node first
+        int needAplay = sGetAplayCommand(nodeFD, aplayCmd, 1024);
+        if ( needAplay ) {
+            ad_stop_rec(ad);
+            printf("receive aplay command:%s\n", aplayCmd);
+            sAplayWait(aplayCmd);
+            ad_start_rec(ad);
+        }
+
+        //start to process the data we got from rec
         ps_process_raw(ps, adbuf, k, FALSE, FALSE);
         in_speech = ps_get_in_speech(ps);
         
@@ -300,34 +387,36 @@ recognize_from_microphone()
                 kill(recordPID, SIGTERM);
                 waitpid(recordPID, &pids, 0);
                 recordPID = 0;
-                char msg[1024];
-                int result = sProcessCommand(msg, 1024);
-                int bye = 0;
-                if ( result == 0 ) {
-                    bye = isBye(msg);
-                    if ( !bye ) {
-                        //output the command
-                        printf("%s", msg);
-                        ad_stop_rec(ad);
-                        sAplayWait(wav_proc);
-                        ad_start_rec(ad);
-                    }
-                }
-                //once we got command, reset humix-loop
-                humixCount = 0;
-                if ( bye ) {
+                ps_end_utt(ps);
+                hyp = ps_get_hyp(ps, NULL );
+                if (hyp != NULL && strcmp("GOODBYE", hyp) == 0) {
+                    state = kWaitCommand;
+                    printf("keyword GOODBYE found\n");
+                    fflush(stdout);
                     ad_stop_rec(ad);
                     sAplayWait(wav_bye);
                     ad_start_rec(ad);
                     state = kReady;
                     printf("READY....\n");
                 } else {
+                    char msg[1024];
+                    ad_stop_rec(ad);
+                    sAplayWait(wav_proc);
+                    ad_start_rec(ad);
+                    int result = sProcessCommand(msg, 1024);
+                    if ( result == 0 ) {
+                        printf("%s", msg);
+                    } else {
+                        printf("No command found!");
+                    }
+                    //once we got command, reset humix-loop
+                    humixCount = 0;
                     //also restart recording
                     recordPID = sStartRecord();
                     state = kWaitCommand;
                     printf("Waiting for a command...\n");
+
                 }
-                ps_end_utt(ps);
                 if (ps_start_utt(ps) < 0)
                     E_FATAL("Failed to start utterance\n");
             }

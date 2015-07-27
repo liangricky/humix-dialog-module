@@ -5,6 +5,7 @@ OBJ_SPHINXAD=deps/sphinxbase-$(SPHINXBASE_VER)/src/libsphinxad/.libs/libsphinxad
 OBJ_POCKETSPHINX=deps/pocketsphinx-$(POCKETSPHINX_VER)/src/libpocketsphinx/.libs/libpocketsphinx.a
 OBJ_HUMIXSPEECH=humix-speech.o
 DEBUG=#-g
+LIBS=-lasound -lpthread -lm
 CFLAGS=$(DEBUG) -O2 -Wall
 
 all: humix-speech
@@ -13,10 +14,10 @@ humix-speech: $(OBJ_HUMIXSPEECH)
 	gcc $(CFLAGS) \
 		-Wl,--whole-archive $(OBJ_SPHINXBASE) $(OBJ_SPHINXAD) $(OBJ_POCKETSPHINX) -Wl,--no-whole-archive  \
 		-o $@ $(OBJ_HUMIXSPEECH) $(OBJ_SPHINXBASE) $(OBJ_SPHINXAD) $(OBJ_POCKETSPHINX) \
-		-lasound -lm
+		$(LIBS)
 
 $(OBJ_HUMIXSPEECH): $(OBJ_SPHINXBASE) $(OBJ_SPHINXAD) $(OBJ_POCKETSPHINX) humix-speech.c
-	gcc $(CFLAGS) -I. -Ideps/sphinxbase-$(SPHINXBASE_VER)/include -Ideps/pocketsphinx-$(POCKETSPHINX_VER)/include -lasound -lpthread -lm -c -o $@ humix-speech.c
+	gcc $(CFLAGS) -I. -Ideps/sphinxbase-$(SPHINXBASE_VER)/include -Ideps/pocketsphinx-$(POCKETSPHINX_VER)/include $(LIBS) -c -o $@ humix-speech.c
 
 $(OBJ_SPHINXBASE): deps
 	tar -xf sphinxbase-$(SPHINXBASE_VER).tar.gz -C deps

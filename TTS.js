@@ -1,14 +1,18 @@
 var console = require('console');
-var config = require('./config');
-var sys = require('sys');
-var nats = require('nats').connect();
-var exec = require('child_process').exec;
+var config  = require('./config');
+var sys     = require('sys');
+var nats    = require('nats').connect();
+var exec    = require('child_process').exec;
 var execSync = require('child_process').execSync;
-var soap = require('soap');
-var crypto = require('crypto');
+var soap    = require('soap');
+var crypto  = require('crypto');
+var net     = require('net');
+var fs      = require('fs');
+var Buffer  = require('buffer').Buffer;
 
 var voice_path = "./controls/humix-sense-speech/voice/";
 var url = 'http://tts.itri.org.tw/TTSService/Soap_1_3.php?wsdl';
+var connHumixSpeech = null;
 
 
 function puts(error, stdout, stderr) {sys.puts(stdout)}
@@ -89,11 +93,23 @@ function download (id) {
         {
            var wav_file = voice_path + "text/" + result + ".wav";
            console.log('Play wav file: ' + wav_file);
-           execSync("aplay "+ wav_file, null);
+           sendAplay2HumixSpeech(connHumixSpeech, wav_file);
         }
     });
 }
 
+
+function sendAplay2HumixSpeech( conn, file ) {
+    if ( !conn || !file ) {
+        return;
+    }
+    var len = 4 + 1 + file.length; //uint32_t, uint8_t, string
+    var msg = new Buffer(len);
+    msg.writeUInt32LE(len - 4, 0);
+    msg.writeUInt8(1, 4);// 1- aplay, 2 - xxxx
+    msg.write(file, 5);
+    conn.write(msg);
+}
 
 var msg = '';
 var wavehash = new Object();
@@ -112,7 +128,7 @@ nats.subscribe('humix.sense.speech.command', function(msg) {
     if (wavehash.hasOwnProperty(hash)) {
         var wav_file = voice_path + "text/" + wavehash[hash] + ".wav";
         console.log('Play hash wav file: ' +  wav_file);
-        execSync("aplay "+ wav_file, null);
+        sendAplay2HumixSpeech(connHumixSpeech, wav_file);
     }
     else {
         console.log("hash not found");
@@ -127,8 +143,26 @@ nats.subscribe('humix.sense.speech.command', function(msg) {
     }
 });
 
+
+//create domain socket before fork humix-speech
+try {
+    fs.unlinkSync('/tmp/humix-speech-socket'); //remove domain socket if there is
+} catch ( e ) {}
+var server = net.createServer(function(conn) { //'connection' listener
+    conn.on('end', function() {
+        console.log('humix-speech disconnected');
+    });
+    console.error('humix-speech connected');
+    connHumixSpeech = conn;
+});
+
+server.listen('/tmp/humix-speech-socket', function() { //'listening' listener
+    console.log('ready for humix-speech to hook up');
+});
+
 //use child process to handle speech to text
-var speechProc = exec(config.speechCmd + ' ' + config.args.join(' '), function () {
+var speechProc = exec(config.speechCmd + ' ' + config.args.join(' '), function (error) {
+    console.error(error);
 });
 
 var commandRE = /---=(.*)=---/;
@@ -136,6 +170,7 @@ var prefix = '---="';
 
 speechProc.stdout.on('data', function (data) {
     var data = data.trim();
+    //console.error(data);
     if ( commandRE.test(data) ) {
         nats.publish('humix.sense.speech.event', data.substr(prefix.length, data.length- (prefix.length * 2)));
         console.error('command found:' + data.substr(prefix.length, data.length - (prefix.length * 2)));
@@ -149,3 +184,11 @@ speechProc.on('close', function(code) {
 speechProc.on('error', function (error) {
     console.error(error);
 });
+
+//test code start here 
+//function testSendAplay() {
+//    console.error('send aplay');
+//    sendAplay2HumixSpeech(connHumixSpeech, '/home/yhwang/humix/humix-sense/controls/humix-sense-speech/voice/interlude/what.wav');
+//    setTimeout(testSendAplay, 5000);
+//}
+//setTimeout(testSendAplay, 5000);
