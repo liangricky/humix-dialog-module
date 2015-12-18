@@ -9,8 +9,9 @@ var crypto  = require('crypto');
 var net     = require('net');
 var fs      = require('fs');
 var Buffer  = require('buffer').Buffer;
+var path    = require('path');
 
-var voice_path = "./controls/humix-sense-speech/voice/";
+var voice_path = path.join(__dirname, "voice");
 var url = 'http://tts.itri.org.tw/TTSService/Soap_1_3.php?wsdl';
 var connHumixSpeech = null;
 
@@ -63,7 +64,7 @@ function getConvertStatus(id, callback) {
             if (downloadUrl) {
                 //console.log('get download url: '+downloadUrl);
                 console.log(id + " " + downloadUrl);
-                var wav_file = voice_path + "text/" + id + ".wav";
+                var wav_file = path.join(voice_path, "text", id + ".wav");
                 execSync("wget "+ downloadUrl + " -O " + wav_file, null);
                 callback(null, id);
             } else {
@@ -91,7 +92,7 @@ function download (id) {
         }
         else 
         {
-           var wav_file = voice_path + "text/" + result + ".wav";
+           var wav_file = path.join(voice_path,"text", result + ".wav");
            console.log('Play wav file: ' + wav_file);
            sendAplay2HumixSpeech(connHumixSpeech, wav_file);
         }
@@ -126,7 +127,7 @@ nats.subscribe('humix.sense.speech.command', function(msg) {
     var hash = crypto.createHash('md5').update(text).digest('hex');
     console.log ("hash value: " + hash);
     if (wavehash.hasOwnProperty(hash)) {
-        var wav_file = voice_path + "text/" + wavehash[hash] + ".wav";
+        var wav_file = path.join(voice_path,"text", wavehash[hash] + ".wav");
         console.log('Play hash wav file: ' +  wav_file);
         sendAplay2HumixSpeech(connHumixSpeech, wav_file);
     }
@@ -170,7 +171,7 @@ var prefix = '---="';
 
 speechProc.stdout.on('data', function (data) {
     var data = data.trim();
-    //console.error(data);
+    console.error(data);
     if ( commandRE.test(data) ) {
         nats.publish('humix.sense.speech.event', data.substr(prefix.length, data.length- (prefix.length * 2)));
         console.error('command found:' + data.substr(prefix.length, data.length - (prefix.length * 2)));

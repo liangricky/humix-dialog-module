@@ -92,7 +92,7 @@ static int sStartRecord() {
         return -1;
     }
     if ( pid == 0) {
-        int rev = execl("/usr/bin/arecord", "/usr/bin/arecord", "-f", "cd", "-r", "16000", "-t", "wav", "/dev/shm/test.wav", (char*) NULL);
+        int rev = execl("/usr/bin/arecord", "/usr/bin/arecord", "-c", "1", "-f", "s16_le", "-r", "16000", "-t", "wav", "/dev/shm/test.wav", (char*) NULL);
         if ( rev == -1 ) {
             printf("fork error:%s\n", strerror(errno));
         }
@@ -353,7 +353,7 @@ recognize_from_microphone()
                 state = kCommand;
             } else {
                 //increase waiting count;
-                if (++waitCount > 60) {
+                if (++waitCount > 20) {
                     waitCount = 0;
                     if ( ++humixCount > 20 ) {
                         //exit humix-loop

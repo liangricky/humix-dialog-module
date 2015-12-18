@@ -2,8 +2,9 @@
   "name": "humix-sense-speech",
   "version": "0.1.0",
   "private": true,
+  "main": "TTS.js",
   "scripts": {
-    "start": "node ./bin/start.sh"
+    "install": "make"
   },
   "dependencies": {
     "logule": "^2.0.1",
