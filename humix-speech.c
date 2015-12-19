@@ -12,11 +12,96 @@
 #include <fcntl.h>
 #include <stdint.h>
 
+#include <fstream>
 
 #include <sys/select.h>
 #include <sphinxbase/err.h>
 #include <sphinxbase/ad.h>
 #include <pocketsphinx.h>
+
+static char RIF_MARKER[5] = "RIFF";
+static char WAVE[5] = "WAVE";
+static char FMT[5] = "fmt ";
+
+/**
+ *
+ * Use this class to write wav file
+ * fixed format: S16, because sphinx uses it
+ */
+
+class WavWriter
+{
+public:
+    WavWriter(const char* filename, uint16_t channel, uint32_t sample) {
+        RIFF_marker = RIF_MARKER;
+        filetype_header = WAVE;
+        format_marker = FMT;
+        data_header_length = 16;
+        file_size = 36;
+        format_type = 1;
+        number_of_channels = channel;
+        sample_rate = sample;
+        bytes_per_second = sample * channel * 16 / 8;
+        bytes_per_frame = channel * 16 / 8;
+        bits_per_sample = 16;
+        ofs.open (filename, std::ofstream::out | std::ofstream::trunc);
+    }
+
+    ~WavWriter() {
+        if (file_size>36) {
+            //modify the fie size field
+            ofs.seekp(4);
+            ofs.write((char*)&file_size, 4);
+
+            ofs.seekp(40);
+            uint32_t data_size = file_size - 36;
+            ofs.write((char*)&data_size, 4);
+        }
+        ofs.close();
+    }
+
+    void writeHeader();
+    void writeData(const char *data, size_t size);
+
+private:
+    char* filename;
+    char* RIFF_marker;
+    uint32_t file_size;
+    char* filetype_header;
+    char* format_marker;
+    uint32_t data_header_length;
+    uint16_t format_type;
+    uint16_t number_of_channels;
+    uint32_t sample_rate;
+    uint32_t bytes_per_second;
+    uint16_t bytes_per_frame;
+    uint16_t bits_per_sample;
+    std::ofstream ofs;
+};
+
+void WavWriter::writeHeader()
+{
+    ofs.write(RIFF_marker, 4);
+    ofs.write((char*)&file_size, 4);
+    ofs.write(filetype_header, 4);
+    ofs.write(format_marker, 4);
+    ofs.write((char*)&data_header_length, 4);
+    ofs.write((char*)&format_type, 2);
+    ofs.write((char*)&number_of_channels, 2);
+    ofs.write((char*)&sample_rate, 4);
+    ofs.write((char*)&bytes_per_second, 4);
+    ofs.write((char*)&bytes_per_frame, 2);
+    ofs.write((char*)&bits_per_sample, 2);
+    ofs.write("data", 4);
+
+    uint32_t data_size = file_size - 36;
+    ofs.write((char*)&data_size, 4);
+}
+
+void WavWriter::writeData(const char* data, size_t size) {
+    ofs.write(data, size);
+    file_size += size;
+}
 
 static const arg_t cont_args_def[] = {
     POCKETSPHINX_OPTIONS,
@@ -85,36 +170,6 @@ sleep_msec(int32 ms)
 
     select(0, NULL, NULL, NULL, &tmo);
 }
-
-static int sStartRecord() {
-    pid_t pid = fork();
-    if ( pid < 0) {
-        return -1;
-    }
-    if ( pid == 0) {
-        int rev = execl("/usr/bin/arecord", "/usr/bin/arecord", "-c", "1", "-f", "s16_le", "-r", "16000", "-t", "wav", "/dev/shm/test.wav", (char*) NULL);
-        if ( rev == -1 ) {
-            printf("fork error:%s\n", strerror(errno));
-        }
-        _exit(1);
-    }
-    return pid;
-}
-
-/*static int sAplay(const char* file) {
-    pid_t pid = fork();
-    if ( pid < 0) {
-        return -1;
-    }
-    if ( pid == 0) {
-        int rev = execl("/usr/bin/aplay", "/usr/bin/aplay", file ,(char*) NULL);
-        if ( rev == -1 ) {
-            printf("fork error:%s\n", strerror(errno));
-        }
-        _exit(1);
-    }
-    return pid;
-}*/
 
 static size_t
 strlcpy(char *dst, const char *src, size_t siz)
@@ -275,14 +330,14 @@ recognize_from_microphone()
     char const *hyp;
     state = kReady;
     int waitCount = 0;
-    pid_t recordPID = 0;
     int humixCount = 0;
     char aplayCmd[1024];
     int nodeFD = sConnect2Node("/tmp/humix-speech-socket");
+
+    WavWriter *wavWriter = NULL;
     if ( nodeFD == -1 ) {
         printf("Failed to open connect to node\n");
     }
-
 
     if ((ad = ad_open_dev(cmd_ln_str_r(config, "-adcdev"),
                           (int) cmd_ln_float32_r(config,
@@ -337,8 +392,6 @@ recognize_from_microphone()
                     ad_start_rec(ad);
                     printf("Waiting for a command...");
                     humixCount = 0;
-                    //also start recording
-                    recordPID = sStartRecord();
                 } else {
                     state = kReady;
                     printf("READY....\n");
@@ -351,27 +404,18 @@ recognize_from_microphone()
             if ( in_speech ) {
                 printf("Listening the command...\n");
                 state = kCommand;
+                wavWriter = new WavWriter("/dev/shm/test.wav", 1, 16000);
+                wavWriter->writeHeader();
+                wavWriter->writeData((char*)adbuf, (size_t)(k*2));
             } else {
                 //increase waiting count;
                 if (++waitCount > 100) {
                     waitCount = 0;
                     if ( ++humixCount > 20 ) {
                         //exit humix-loop
-                        int pids = 0;
-                        kill(recordPID, SIGTERM);
-                        waitpid(recordPID, &pids, 0);
-                        recordPID = 0;
                         state = kReady;
                         printf("READY....\n");
                    } else {
-                        //still in humix-loop but we need to restart to recording
-                        //in order to avoid the file becomes too large
-                        //stop the recording as well
-                        int pids = 0;
-                        kill(recordPID, SIGTERM);
-                        waitpid(recordPID, &pids, 0);
-                        recordPID = 0;
-                        recordPID = sStartRecord();
                         printf(".");
                     }
                     ps_end_utt(ps);
@@ -383,45 +427,28 @@ recognize_from_microphone()
         case kCommand:
             if ( in_speech ) {
                 //keep receiving command
+                wavWriter->writeData((char*)adbuf, (size_t)(k*2));
             } else {
+                wavWriter->writeData((char*)adbuf, (size_t)(k*2));
+                delete wavWriter;
+                wavWriter = NULL;
                 //start to process command
-                int pids = 0;
-                kill(recordPID, SIGTERM);
-                waitpid(recordPID, &pids, 0);
-                recordPID = 0;
                 ps_end_utt(ps);
-                int score = 0;
-                hyp = ps_get_hyp(ps, &score );
-                if (hyp != NULL && strcmp("BYEBYE", hyp) == 0) {
-                    printf("score:%d\n", score);
-                    state = kWaitCommand;
-                    printf("keyword GOODBYE found\n");
-                    fflush(stdout);
-                    ad_stop_rec(ad);
-                    sAplayWait(wav_bye);
-                    ad_start_rec(ad);
-                    state = kReady;
-                    printf("READY....\n");
+                printf("StT processing\n");
+                char msg[1024];
+                ad_stop_rec(ad);
+                sAplayWait(wav_proc);
+                int result = sProcessCommand(msg, 1024);
+                if ( result == 0 ) {
+                    printf("%s", msg);
                 } else {
-                    printf("StT processing\n");
-                    char msg[1024];
-                    ad_stop_rec(ad);
-                    sAplayWait(wav_proc);
-                    int result = sProcessCommand(msg, 1024);
-                    if ( result == 0 ) {
-                        printf("%s", msg);
-                    } else {
-                        printf("No command found!");
-                    }
-                    //once we got command, reset humix-loop
-                    humixCount = 0;
-                    ad_start_rec(ad);
-                    //also restart recording
-                    recordPID = sStartRecord();
-                    state = kWaitCommand;
-                    printf("Waiting for a command...\n");
-
+                    printf("No command found!");
                 }
+                //once we got command, reset humix-loop
+                humixCount = 0;
+                ad_start_rec(ad);
+                state = kWaitCommand;
+                printf("Waiting for a command...\n");
                 if (ps_start_utt(ps) < 0)
                     E_FATAL("Failed to start utterance\n");
             }

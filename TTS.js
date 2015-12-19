@@ -25,7 +25,7 @@ function convertText(text, hash, callback) {
         TTStext: text,
         TTSSpeaker: 'Bruce',
         volume: 50,
-        speed: 0,
+        speed: -2,
         outType: 'wav'
     };
     soap.createClient(url, function(err, client) {
@@ -65,7 +65,7 @@ function getConvertStatus(id, callback) {
                 //console.log('get download url: '+downloadUrl);
                 console.log(id + " " + downloadUrl);
                 var wav_file = path.join(voice_path, "text", id + ".wav");
-                execSync("wget "+ downloadUrl + " -O " + wav_file, null);
+                execSync("wget "+ downloadUrl + " -O " + wav_file);
                 callback(null, id);
             } else {
                 var error = 'Still converting! result: '+JSON.stringify(result);
@@ -115,7 +115,9 @@ function sendAplay2HumixSpeech( conn, file ) {
 var msg = '';
 var wavehash = new Object();
 // subscribe events
-nats.subscribe('humix.sense.speech.command', function(msg) {
+nats.subscribe('humix.sense.speech.command', text2Speech);
+
+function text2Speech(msg) {
     console.log('Received a message: ' + msg);
     var text = JSON.parse(msg).text || undefined,
         wav_file = '';
@@ -142,8 +144,7 @@ nats.subscribe('humix.sense.speech.command', function(msg) {
             }
         });
     }
-});
-
+}
 
 //create domain socket before fork humix-speech
 try {
@@ -166,14 +167,18 @@ var prefix = '---="';
 var speechProc = undefined;
 //use child process to handle speech to text
 function startHumixSpeech() {
-    speechProc = exec(config.speechCmd + ' ' + config.args.join(' '), function (error) {
+    speechProc = exec(config.speechCmd + ' ' + config.args.join(' '),  {maxBuffer: 1024 * 500}, function (error) {
         console.error(error);
     });
     speechProc.stdout.on('data', function (data) {
         process.stdout.write(data);
         if ( commandRE.test(data) ) {
-            nats.publish('humix.sense.speech.event', data.substr(prefix.length, data.length- (prefix.length * 2)));
-            console.error('command found:' + data.substr(prefix.length, data.length - (prefix.length * 2)));
+            data = data.trim();
+            var cmd = data.substr(prefix.length, data.length - (prefix.length * 2));
+            nats.publish('humix.sense.speech.event', cmd);
+            console.error('command found:', cmd);
+            //echo mode
+            //text2Speech( '{ "text" : "' + cmd + '" }' );
         }
     });
     speechProc.on('close', function(code) {
@@ -215,7 +220,6 @@ process.on('SIGTERM', function() {
 });
 process.on('exit', function() {
     if ( speechProc ) speechProc.kill('SIGHUP');
-    process.exit(0);
 });
 
 
