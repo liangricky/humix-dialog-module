@@ -35,19 +35,19 @@ static const arg_t cont_args_def[] = {
      "Print word times in file transcription."},
     {"-cmdproc",
      ARG_STRING,
-     "/home/pi/humix/humix-sense/controls/humix-sense-speech/processcmd.sh",
+     "./processcmd.sh",
      "command processor."},
     {"-wav-say",
      ARG_STRING,
-     "/home/pi/humix/humix-sense/controls/humix-sense-speech/voice/interlude/pleasesay.wav",
+     "./voice/interlude/pleasesay1.wav",
      "the wave file of saying."},
     {"-wav-proc",
      ARG_STRING,
-     "/home/pi/humix/humix-sense/controls/humix-sense-speech/voice/interlude/process.wav",
+     "./voice/interlude/process1.wav",
      "the wave file of processing."},
     {"-wav-bye",
      ARG_STRING,
-     "/home/pi/humix/humix-sense/controls/humix-sense-speech/voice/interlude/bye.wav",
+     "./voice/interlude/bye.wav",
      "the wave file of goodbye."},
     {"-lang",
      ARG_STRING,
@@ -297,9 +297,6 @@ recognize_from_microphone()
     printf("READY....\n");
 
     for (;;) {
-        if ((k = ad_read(ad, adbuf, 4096)) < 0)
-            E_FATAL("Failed to read audio\n");
-
         //read data from rec, we need to check if there is any aplay request from node first
         int needAplay = sGetAplayCommand(nodeFD, aplayCmd, 1024);
         if ( needAplay ) {
@@ -308,6 +305,9 @@ recognize_from_microphone()
             sAplayWait(aplayCmd);
             ad_start_rec(ad);
         }
+
+        if ((k = ad_read(ad, adbuf, 4096)) < 0)
+            E_FATAL("Failed to read audio\n");
 
         //start to process the data we got from rec
         ps_process_raw(ps, adbuf, k, FALSE, FALSE);
@@ -335,7 +335,7 @@ recognize_from_microphone()
                     ad_stop_rec(ad);
                     sAplayWait(wav_say);
                     ad_start_rec(ad);
-                    printf("Waiting for a command...\n");
+                    printf("Waiting for a command...");
                     humixCount = 0;
                     //also start recording
                     recordPID = sStartRecord();
@@ -353,7 +353,7 @@ recognize_from_microphone()
                 state = kCommand;
             } else {
                 //increase waiting count;
-                if (++waitCount > 20) {
+                if (++waitCount > 100) {
                     waitCount = 0;
                     if ( ++humixCount > 20 ) {
                         //exit humix-loop
@@ -372,7 +372,7 @@ recognize_from_microphone()
                         waitpid(recordPID, &pids, 0);
                         recordPID = 0;
                         recordPID = sStartRecord();
-                        printf("Waiting for a command...\n");
+                        printf(".");
                     }
                     ps_end_utt(ps);
                     if (ps_start_utt(ps) < 0)
@@ -390,8 +390,10 @@ recognize_from_microphone()
                 waitpid(recordPID, &pids, 0);
                 recordPID = 0;
                 ps_end_utt(ps);
-                hyp = ps_get_hyp(ps, NULL );
-                if (hyp != NULL && strcmp("GOODBYE", hyp) == 0) {
+                int score = 0;
+                hyp = ps_get_hyp(ps, &score );
+                if (hyp != NULL && strcmp("BYEBYE", hyp) == 0) {
+                    printf("score:%d\n", score);
                     state = kWaitCommand;
                     printf("keyword GOODBYE found\n");
                     fflush(stdout);
@@ -401,10 +403,10 @@ recognize_from_microphone()
                     state = kReady;
                     printf("READY....\n");
                 } else {
+                    printf("StT processing\n");
                     char msg[1024];
                     ad_stop_rec(ad);
                     sAplayWait(wav_proc);
-                    ad_start_rec(ad);
                     int result = sProcessCommand(msg, 1024);
                     if ( result == 0 ) {
                         printf("%s", msg);
@@ -413,6 +415,7 @@ recognize_from_microphone()
                     }
                     //once we got command, reset humix-loop
                     humixCount = 0;
+                    ad_start_rec(ad);
                     //also restart recording
                     recordPID = sStartRecord();
                     state = kWaitCommand;
@@ -425,7 +428,7 @@ recognize_from_microphone()
             break;
         }
 
-        sleep_msec(100);
+        sleep_msec(20);
     }
     ad_close(ad);
 }

@@ -161,30 +161,63 @@ server.listen('/tmp/humix-speech-socket', function() { //'listening' listener
     console.log('ready for humix-speech to hook up');
 });
 
-//use child process to handle speech to text
-var speechProc = exec(config.speechCmd + ' ' + config.args.join(' '), function (error) {
-    console.error(error);
-});
-
 var commandRE = /---=(.*)=---/;
 var prefix = '---="';
+var speechProc = undefined;
+//use child process to handle speech to text
+function startHumixSpeech() {
+    speechProc = exec(config.speechCmd + ' ' + config.args.join(' '), function (error) {
+        console.error(error);
+    });
+    speechProc.stdout.on('data', function (data) {
+        process.stdout.write(data);
+        if ( commandRE.test(data) ) {
+            nats.publish('humix.sense.speech.event', data.substr(prefix.length, data.length- (prefix.length * 2)));
+            console.error('command found:' + data.substr(prefix.length, data.length - (prefix.length * 2)));
+        }
+    });
+    speechProc.on('close', function(code) {
+        console.error('speech proc finished with code:' + code);
+        speechProc = undefined;
+        process.nextTick(startHumixSpeech);
+    });
 
-speechProc.stdout.on('data', function (data) {
-    var data = data.trim();
-    console.error(data);
-    if ( commandRE.test(data) ) {
-        nats.publish('humix.sense.speech.event', data.substr(prefix.length, data.length- (prefix.length * 2)));
-        console.error('command found:' + data.substr(prefix.length, data.length - (prefix.length * 2)));
+    speechProc.on('error', function (error) {
+        console.error(error);
+    });
+}
+
+startHumixSpeech();
+
+
+//register signal handlers to terminate the humix-speech process
+process.stdin.resume();
+process.on('SIGINT', function() {
+    if (speechProc) {
+        speechProc.kill('SIGHUP');
+        speechProc = undefined;
     }
+    process.exit(0);
+});
+process.on('SIGHUP', function() {
+    if (speechProc) {
+        speechProc.kill('SIGHUP');
+        speechProc = undefined;
+    }
+    process.exit(0);
+});
+process.on('SIGTERM', function() {
+    if (speechProc) {
+        speechProc.kill('SIGHUP');
+        speechProc = undefined;
+    }
+    process.exit(0);
+});
+process.on('exit', function() {
+    if ( speechProc ) speechProc.kill('SIGHUP');
+    process.exit(0);
 });
 
-speechProc.on('close', function(code) {
-    console.error('speech proc finished with code:' + code);
-});
-
-speechProc.on('error', function (error) {
-    console.error(error);
-});
 
 //test code start here 
 //function testSendAplay() {
