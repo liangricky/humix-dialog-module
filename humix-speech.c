@@ -15,6 +15,8 @@
 #include <fstream>
 
 #include <sys/select.h>
+#include <sndfile.h>
+#include <alsa/asoundlib.h>
 #include <sphinxbase/err.h>
 #include <sphinxbase/ad.h>
 #include <pocketsphinx.h>
@@ -102,6 +104,122 @@ void WavWriter::writeData(const char* data, size_t size) {
     ofs.write(data, size);
     file_size += size;
 }
+
+class WavPlayer {
+public:
+    WavPlayer(uint16_t channel, uint32_t sample_rate) {
+        unsigned int pcm = 0;
+        int dir = 0;
+        
+        frames = 64;
+        pcm_handle = NULL;
+        params = NULL;
+        buff = NULL;
+        error = false;
+        size = 0;
+
+        /* Open the PCM device in playback mode */
+        if ( (pcm = snd_pcm_open(&pcm_handle, "default", SND_PCM_STREAM_PLAYBACK, 0)) < 0) {
+            printf("ERROR: %s\n", snd_strerror(pcm));
+            error = true;
+            return;
+        }
+        /* Allocate the snd_pcm_hw_params_t structure on the stack. */
+        snd_pcm_hw_params_alloca(&params);
+        /* Init hwparams with full configuration space */
+        if (snd_pcm_hw_params_any(pcm_handle, params) < 0) {
+            printf("Can not configure this PCM device.\n");
+            error = true;
+            return;
+        }
+        if (snd_pcm_hw_params_set_access(pcm_handle, params, SND_PCM_ACCESS_RW_INTERLEAVED) < 0) {
+            printf("Error setting access.\n");
+            error = true;
+            return;
+        }
+
+        /* Set sample format: always S16_LE */
+        if (snd_pcm_hw_params_set_format(pcm_handle, params, SND_PCM_FORMAT_S16_LE) < 0) {
+            printf("Error setting format.\n");
+            return;
+        }
+        /* Set sample rate */
+        uint32_t exact_rate = sample_rate;
+        if (snd_pcm_hw_params_set_rate_near(pcm_handle, params, &exact_rate, &dir) < 0) {
+            printf("Error setting rate.\n");
+            error = true;
+            return;
+        }
+        /* Set number of channels */
+        if (snd_pcm_hw_params_set_channels(pcm_handle, params, channel) < 0) {
+            printf("Error setting channels.\n");
+            error = true;
+            return;
+        }
+        if (snd_pcm_hw_params_set_period_size_near(pcm_handle, params, &frames, &dir) < 0) {
+            printf("Error setting period size.\n");
+            error = true;
+            return;
+        }
+        /* Write the parameters to the driver */
+        if ( (pcm = snd_pcm_hw_params(pcm_handle, params)) < 0) {
+            printf("unable to set hw parameters: %s\n",
+              snd_strerror(pcm));
+            error = true;
+            return;
+        }
+        /* Use a buffer large enough to hold one period */
+        if (snd_pcm_hw_params_get_period_size(params, &frames, NULL) < 0) {
+            printf("Error get buffer size.\n");
+            error = true;
+            return;
+        }
+
+        size = frames * channel * 2; /* 2 -> sample size */;
+        printf("frames: %lu, buff size:%lu\n", frames, size);
+        buff = (char *) malloc(size);
+
+    }
+
+    ~WavPlayer() {
+        if (!error) {
+            if ( pcm_handle ) {
+                snd_pcm_close(pcm_handle);
+            }
+            if ( buff ) {
+                free(buff);
+            }
+        }
+    }
+
+    void play(const char* filename) {
+        SF_INFO sfinfo;
+        SNDFILE *infile = NULL;
+        infile = sf_open(filename, SFM_READ, &sfinfo);
+        if (infile) {
+            int pcmrc = 0;
+            int readcount = 0;
+             while ((readcount = sf_readf_short(infile, (short*)buff, frames))>0) {
+                 //printf("readcount:%d\n", readcount);
+                 pcmrc = snd_pcm_writei(pcm_handle, buff, readcount);
+                 if (pcmrc == -EPIPE) {
+                     fprintf(stderr, "Underrun!\n");
+                     snd_pcm_prepare(pcm_handle);
+                 }
+             }
+             sf_close(infile);
+        }
+    }
+private:
+    uint16_t channel;
+    uint32_t sample_rate;
+    snd_pcm_t *pcm_handle;
+    snd_pcm_hw_params_t *params;
+    snd_pcm_uframes_t frames;
+    char* buff;
+    size_t size;
+    bool error;
+};
 
 static const arg_t cont_args_def[] = {
     POCKETSPHINX_OPTIONS,
@@ -249,7 +367,7 @@ static int sGetAplayCommand(int fd, char* buff, ssize_t len) {
     return 0;
 }
 
-static int sAplayWait(const char* file) {
+/*static int sAplayWait(const char* file) {
     pid_t pid = fork();
     if ( pid < 0) {
         return -1;
@@ -266,7 +384,7 @@ static int sAplayWait(const char* file) {
     }
 
     return pid;
-}
+}*/
 
 
 
@@ -335,6 +453,7 @@ recognize_from_microphone()
     int nodeFD = sConnect2Node("/tmp/humix-speech-socket");
 
     WavWriter *wavWriter = NULL;
+    WavPlayer player(1, 16000);
     if ( nodeFD == -1 ) {
         printf("Failed to open connect to node\n");
     }
@@ -357,7 +476,7 @@ recognize_from_microphone()
         if ( needAplay ) {
             ad_stop_rec(ad);
             printf("receive aplay command:%s\n", aplayCmd);
-            sAplayWait(aplayCmd);
+            player.play(aplayCmd);
             ad_start_rec(ad);
         }
 
@@ -388,7 +507,7 @@ recognize_from_microphone()
                     printf("keyword HUMIX found\n");
                     fflush(stdout);
                     ad_stop_rec(ad);
-                    sAplayWait(wav_say);
+                    player.play(wav_say);
                     ad_start_rec(ad);
                     printf("Waiting for a command...");
                     humixCount = 0;
@@ -437,7 +556,7 @@ recognize_from_microphone()
                 printf("StT processing\n");
                 char msg[1024];
                 ad_stop_rec(ad);
-                sAplayWait(wav_proc);
+                player.play(wav_proc);
                 int result = sProcessCommand(msg, 1024);
                 if ( result == 0 ) {
                     printf("%s", msg);

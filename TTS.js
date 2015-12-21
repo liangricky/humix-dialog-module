@@ -223,6 +223,13 @@ process.on('exit', function() {
 });
 
 
+//setTimeout(function () {
+//    sendAplay2HumixSpeech(connHumixSpeech, 'voice/interlude/pleasesay1.wav');
+    //text2Speech( '{ "text" : "Text to Speech" }' );
+//}, 5000);
+//setTimeout(function () {
+//    sendAplay2HumixSpeech(connHumixSpeech, 'voice/interlude/pleasesay2.wav');
+//}, 8000);
 //test code start here 
 //function testSendAplay() {
 //    console.error('send aplay');

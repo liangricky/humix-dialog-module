@@ -5,7 +5,7 @@ OBJ_SPHINXAD=deps/sphinxbase-$(SPHINXBASE_VER)/src/libsphinxad/.libs/libsphinxad
 OBJ_POCKETSPHINX=deps/pocketsphinx-$(POCKETSPHINX_VER)/src/libpocketsphinx/.libs/libpocketsphinx.a
 OBJ_HUMIXSPEECH=humix-speech.o
 DEBUG=#-g
-LIBS=-lasound -lpthread -lm
+LIBS=-lasound -lpthread -lm -lsndfile
 CFLAGS=$(DEBUG) -O2 -Wall
 
 all: humix-speech
