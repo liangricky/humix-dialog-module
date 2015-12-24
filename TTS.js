@@ -1,6 +1,6 @@
 var console = require('console');
 var config  = require('./config');
-var sys     = require('sys');
+var sys     = require('util');
 var nats    = require('nats').connect();
 var exec    = require('child_process').exec;
 var execSync = require('child_process').execSync;
