@@ -176,7 +176,6 @@ public:
         }
 
         size = frames * channel * 2; /* 2 -> sample size */;
-        printf("frames: %lu, buff size:%lu\n", frames, size);
         buff = (char *) malloc(size);
 
     }
@@ -275,6 +274,7 @@ static char const* wav_say = NULL;
 static char const* wav_proc = NULL;
 static char const* wav_bye = NULL;
 static char const* lang = NULL;
+static char const* samprateStr = NULL;
 
 /* Sleep for specified msec */
 static void
@@ -357,7 +357,7 @@ static int sGetAplayCommand(int fd, char* buff, ssize_t len) {
             msgLen = (uint32_t*) msgLenBuff;
             char payload[*msgLen + 1];
             readLen = read(fd, payload, *msgLen);
-            if ( readLen == *msgLen ) {
+            if ( readLen == (ssize_t)*msgLen ) {
                 payload[*msgLen] = 0;
                 strlcpy(buff, payload + 1, len);
                 return 1;
@@ -404,7 +404,7 @@ static int sProcessCommand(char* msg, int len) {
         while ((dup2(filedes[1], STDOUT_FILENO) == -1) && (errno == EINTR)) {}
         close(filedes[1]);
         close(filedes[0]);
-        int rev = execl(cmdproc, "processcmd.sh", "/dev/shm/test.wav", "/dev/shm/test.flac", lang, (char*) NULL);
+        int rev = execl(cmdproc, "processcmd.sh", "/dev/shm/test.wav", "/dev/shm/test.flac", lang, samprateStr, (char*) NULL);
         if ( rev == -1 ) {
             printf("fork error:%s\n", strerror(errno));
         }
@@ -451,22 +451,24 @@ recognize_from_microphone()
     int humixCount = 0;
     char aplayCmd[1024];
     int nodeFD = sConnect2Node("/tmp/humix-speech-socket");
+    int samprate = (int) cmd_ln_float32_r(config, "-samprate");
 
     WavWriter *wavWriter = NULL;
-    WavPlayer player(1, 16000);
+    WavPlayer player(1, samprate);
     if ( nodeFD == -1 ) {
         printf("Failed to open connect to node\n");
     }
 
-    if ((ad = ad_open_dev(cmd_ln_str_r(config, "-adcdev"),
-                          (int) cmd_ln_float32_r(config,
-                                                 "-samprate"))) == NULL)
+    if ((ad = ad_open_dev(cmd_ln_str_r(config, "-adcdev"), samprate )) == NULL) {
         E_FATAL("Failed to open audio device\n");
-    if (ad_start_rec(ad) < 0)
+    }
+    if (ad_start_rec(ad) < 0) {
         E_FATAL("Failed to start recording\n");
+    }
 
-    if (ps_start_utt(ps) < 0)
+    if (ps_start_utt(ps) < 0) {
         E_FATAL("Failed to start utterance\n");
+    }
     //utt_started = FALSE;
     printf("READY....\n");
 
@@ -523,7 +525,7 @@ recognize_from_microphone()
             if ( in_speech ) {
                 printf("Listening the command...\n");
                 state = kCommand;
-                wavWriter = new WavWriter("/dev/shm/test.wav", 1, 16000);
+                wavWriter = new WavWriter("/dev/shm/test.wav", 1, samprate);
                 wavWriter->writeHeader();
                 wavWriter->writeData((char*)adbuf, (size_t)(k*2));
             } else {
@@ -615,6 +617,8 @@ main(int argc, char *argv[])
     wav_bye = cmd_ln_str_r(config, "-wav-bye");
     //get language from arg
     lang = cmd_ln_str_r(config, "-lang");
+    //get sample rate as string
+    samprateStr = cmd_ln_str_r(config, "-samprate");
 
     //disable stdout buffer
     setbuf(stdout, NULL);
