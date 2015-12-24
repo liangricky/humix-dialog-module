@@ -14,3 +14,11 @@ speech-to-text and text-to-speech enabling project for Humix
 
 - nodes modules:
     - npm install nats soap
+
+- [natsd](https://github.com/nats-io/gnatsd)
+
+# Run the application
+Make sure **gnatsd** server is running and you are on the project's root folder. Then issue the following command:
+```
+    node .
+```
