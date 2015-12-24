@@ -622,7 +622,6 @@ main(int argc, char *argv[])
     
     int samprate = (int) cmd_ln_float32_r(config, "-samprate");
     sprintf(samprateStr, "%d", samprate);
-    printf("samprateStr:%s\n", samprateStr);
 
     //disable stdout buffer
     setbuf(stdout, NULL);
