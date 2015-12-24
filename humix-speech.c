@@ -274,7 +274,7 @@ static char const* wav_say = NULL;
 static char const* wav_proc = NULL;
 static char const* wav_bye = NULL;
 static char const* lang = NULL;
-static char const* samprateStr = NULL;
+static char samprateStr[10];
 
 /* Sleep for specified msec */
 static void
@@ -442,7 +442,8 @@ static void
 recognize_from_microphone()
 {
     ad_rec_t *ad;
-    int16 adbuf[4096];
+    int16 adbuf[2048];
+    size_t adbuflen = 2048;
     uint8 in_speech; //utt_started, in_speech;
     int32 k;
     char const *hyp;
@@ -482,7 +483,7 @@ recognize_from_microphone()
             ad_start_rec(ad);
         }
 
-        if ((k = ad_read(ad, adbuf, 4096)) < 0)
+        if ((k = ad_read(ad, adbuf, adbuflen)) < 0)
             E_FATAL("Failed to read audio\n");
 
         //start to process the data we got from rec
@@ -618,7 +619,10 @@ main(int argc, char *argv[])
     //get language from arg
     lang = cmd_ln_str_r(config, "-lang");
     //get sample rate as string
-    samprateStr = cmd_ln_str_r(config, "-samprate");
+    
+    int samprate = (int) cmd_ln_float32_r(config, "-samprate");
+    sprintf(samprateStr, "%d", samprate);
+    printf("samprateStr:%s\n", samprateStr);
 
     //disable stdout buffer
     setbuf(stdout, NULL);
