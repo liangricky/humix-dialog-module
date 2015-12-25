@@ -35,12 +35,15 @@ function convertText(text, hash, callback) {
                 console.log('err: '+err);
                 callback(err, null);
             }
-            var id = result.Result.$value.split('&')[2];
-            if (id) {
-                console.log('get id: '+id);
-                callback(null, id, hash);
-            } else {
-                var error = 'failed to convert text!';
+            try {
+                var id = result.Result.$value.split('&')[2];
+                if (id) {
+                    console.log('get id: '+id);
+                    callback(null, id, hash);
+                } else {
+                    throw 'failed to convert text!';
+                }
+            } catch (e) {
                 console.log(error);
                 callback(error, null);
             }
@@ -186,9 +189,9 @@ function startHumixSpeech() {
             nats.publish('humix.sense.speech.event', cmd);
             console.error('command found:', cmd);
             //echo mode
-            //text2Speech( '{ "text" : "' + cmd + '" }' );
-	    if ( cmd.indexOf('聖誕') != -1 && cmd.indexOf('快樂') != -1 ) {
-	        sendAplay2HumixSpeech(connHumixSpeech, 'voice/music/jingle_bells.wav');
+            text2Speech( '{ "text" : "' + cmd + '" }' );
+            if ( cmd.indexOf('聖誕') != -1 && cmd.indexOf('快樂') != -1 ) {
+                sendAplay2HumixSpeech(connHumixSpeech, 'voice/music/jingle_bells.wav');
             } 
         }
     });
