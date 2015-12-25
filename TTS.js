@@ -189,7 +189,7 @@ function startHumixSpeech() {
             nats.publish('humix.sense.speech.event', cmd);
             console.error('command found:', cmd);
             //echo mode
-            text2Speech( '{ "text" : "' + cmd + '" }' );
+            //text2Speech( '{ "text" : "' + cmd + '" }' );
             if ( cmd.indexOf('聖誕') != -1 && cmd.indexOf('快樂') != -1 ) {
                 sendAplay2HumixSpeech(connHumixSpeech, 'voice/music/jingle_bells.wav');
             } 
