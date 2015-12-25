@@ -170,7 +170,7 @@ server.listen('/tmp/humix-speech-socket', function() { //'listening' listener
     console.log('ready for humix-speech to hook up');
 });
 
-var commandRE = /---=(.*)=---/;
+var commandRE = /---="(.*)"=---/;
 var prefix = '---="';
 var speechProc = undefined;
 //use child process to handle speech to text
@@ -180,13 +180,16 @@ function startHumixSpeech() {
     });
     speechProc.stdout.on('data', function (data) {
         process.stdout.write(data);
-        if ( commandRE.test(data) ) {
-            data = data.trim();
-            var cmd = data.substr(prefix.length, data.length - (prefix.length * 2));
+        var match = commandRE.exec(data);
+        if ( match && match.length == 2 ) {
+            var cmd = match[1];
             nats.publish('humix.sense.speech.event', cmd);
             console.error('command found:', cmd);
             //echo mode
-            text2Speech( '{ "text" : "' + cmd + '" }' );
+            //text2Speech( '{ "text" : "' + cmd + '" }' );
+	    if ( cmd.indexOf('聖誕') != -1 && cmd.indexOf('快樂') != -1 ) {
+	        sendAplay2HumixSpeech(connHumixSpeech, 'voice/music/jingle_bells.wav');
+            } 
         }
     });
     speechProc.on('close', function(code) {
