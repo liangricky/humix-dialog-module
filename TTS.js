@@ -12,7 +12,7 @@ var fs      = require('fs');
 var Buffer  = require('buffer').Buffer;
 var path    = require('path');
 
-var voice_path = path.join(__dirname, "voice");
+var voice_path = path.join(__dirname, 'voice');
 var url = 'http://tts.itri.org.tw/TTSService/Soap_1_3.php?wsdl';
 var connHumixSpeech = null;
 
@@ -32,13 +32,13 @@ function convertText(text, hash, callback) {
     soap.createClient(url, function(err, client) {
         client.ConvertText(args, function(err, result) {
             if (err) {
-                console.log('err: '+err);
+                console.log('err:', err);
                 callback(err, null);
             }
             try {
                 var id = result.Result.$value.split('&')[2];
                 if (id) {
-                    console.log('get id: '+id);
+                    console.log('get id:', id);
                     callback(null, id, hash);
                 } else {
                     throw 'failed to convert text!';
@@ -58,18 +58,18 @@ function getConvertStatus(id, callback) {
         convertID: id
     };
     soap.createClient(url, function(err, client) {
-        console.log("msg_id " + id);
+        console.log('msg_id', id);
         client.GetConvertStatus(args, function(err, result) {
             if (err) {
-                console.log('err: '+err);
+                console.log('err:', err);
                 callback(err, null);
             }
             var downloadUrl = result.Result.$value.split('&')[4];
             if (downloadUrl) {
                 //console.log('get download url: '+downloadUrl);
-                console.log(id + " " + downloadUrl);
-                var wav_file = path.join(voice_path, "text", id + ".wav");
-                execSync("wget "+ downloadUrl + " -O " + wav_file, {stdio: [ 'ignore', 'ignore', 'ignooore' ]});
+                console.log(id, downloadUrl);
+                var wav_file = path.join(voice_path, 'text', id + '.wav');
+                execSync('wget '+ downloadUrl + ' -O ' + wav_file, {stdio: [ 'ignore', 'ignore', 'ignooore' ]});
                 callback(null, id);
             } else {
                 var error = 'Still converting! result: '+JSON.stringify(result);
@@ -83,21 +83,21 @@ function getConvertStatus(id, callback) {
 var retry = 0;
 function download (id) {
     retry++;
-    console.log(id+ " " +" download" );
+    console.log(id, 'download' );
     getConvertStatus(id, function(err, result) {
         if (err) 
         { 
-            console.log('err: '+err); 
+            console.log('err:', err); 
             if (retry < 10)
             {
-               console.log("retry " + retry);
+               console.log('retry', retry);
                setTimeout(download, 2000, id);
             }
         }
         else 
         {
-           var wav_file = path.join(voice_path,"text", result + ".wav");
-           console.log('Play wav file: ' + wav_file);
+           var wav_file = path.join(voice_path,'text', result + '.wav');
+           console.log('Play wav file:', wav_file);
            sendAplay2HumixSpeech(connHumixSpeech, wav_file);
         }
     });
@@ -122,7 +122,7 @@ var wavehash = new Object();
 nats.subscribe('humix.sense.speech.command', text2Speech);
 
 function text2Speech(msg) {
-    console.log('Received a message: ' + msg);
+    console.log('Received a message:', msg);
     var text
     var wav_file = '';
     try {
@@ -138,13 +138,13 @@ function text2Speech(msg) {
     //for safe
     text = text.trim();
     var hash = crypto.createHash('md5').update(text).digest('hex');
-    console.log ("hash value: " + hash);
+    console.log ('hash value:', hash);
     if (wavehash.hasOwnProperty(hash)) {
-        var wav_file = path.join(voice_path,"text", wavehash[hash] + ".wav");
-        console.log('Play hash wav file: ' +  wav_file);
+        var wav_file = path.join(voice_path,'text', wavehash[hash] + '.wav');
+        console.log('Play hash wav file:', wav_file);
         sendAplay2HumixSpeech(connHumixSpeech, wav_file);
     } else {
-        console.log("hash not found");
+        console.log('hash not found');
         convertText(text, hash, function(err, id, hashvalue) {
             if (err) {
                 console.log(err); 
