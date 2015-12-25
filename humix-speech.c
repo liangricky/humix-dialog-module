@@ -25,6 +25,19 @@ static char RIF_MARKER[5] = "RIFF";
 static char WAVE[5] = "WAVE";
 static char FMT[5] = "fmt ";
 
+/* Sleep for specified msec */
+static void
+sleep_msec(int32 ms)
+{
+    /* ------------------- Unix ------------------ */
+    struct timeval tmo;
+
+    tmo.tv_sec = 0;
+    tmo.tv_usec = ms * 1000;
+
+    select(0, NULL, NULL, NULL, &tmo);
+}
+
 /**
  *
  * Use this class to write wav file
@@ -111,7 +124,7 @@ public:
         unsigned int pcm = 0;
         int dir = 0;
         
-        frames = 64;
+        frames = 256;
         pcm_handle = NULL;
         params = NULL;
         buff = NULL;
@@ -174,15 +187,17 @@ public:
             error = true;
             return;
         }
+        snd_pcm_nonblock(pcm_handle, 0);
+        //printf("frames:%lu\n", frames);
 
         size = frames * channel * 2; /* 2 -> sample size */;
         buff = (char *) malloc(size);
-
     }
 
     ~WavPlayer() {
         if (!error) {
             if ( pcm_handle ) {
+                snd_pcm_drain(pcm_handle);
                 snd_pcm_close(pcm_handle);
             }
             if ( buff ) {
@@ -198,15 +213,16 @@ public:
         if (infile) {
             int pcmrc = 0;
             int readcount = 0;
-             while ((readcount = sf_readf_short(infile, (short*)buff, frames))>0) {
-                 //printf("readcount:%d\n", readcount);
-                 pcmrc = snd_pcm_writei(pcm_handle, buff, readcount);
-                 if (pcmrc == -EPIPE) {
-                     fprintf(stderr, "Underrun!\n");
-                     snd_pcm_prepare(pcm_handle);
-                 }
-             }
-             sf_close(infile);
+            while ((readcount = sf_readf_short(infile, (short*)buff, frames))>0) {
+                pcmrc = snd_pcm_writei(pcm_handle, buff, readcount);
+                if (pcmrc == -EPIPE) {
+                    printf("Underrun!\n");
+                    snd_pcm_recover(pcm_handle, pcmrc, 1);
+                } else if ( pcmrc != readcount ) {
+                    printf("wframe count mismatched: %d, %d\n", pcmrc, readcount);
+                }
+            }
+            sf_close(infile);
         }
     }
 private:
@@ -275,19 +291,6 @@ static char const* wav_proc = NULL;
 static char const* wav_bye = NULL;
 static char const* lang = NULL;
 static char samprateStr[10];
-
-/* Sleep for specified msec */
-static void
-sleep_msec(int32 ms)
-{
-    /* ------------------- Unix ------------------ */
-    struct timeval tmo;
-
-    tmo.tv_sec = 0;
-    tmo.tv_usec = ms * 1000;
-
-    select(0, NULL, NULL, NULL, &tmo);
-}
 
 static size_t
 strlcpy(char *dst, const char *src, size_t siz)
@@ -367,27 +370,6 @@ static int sGetAplayCommand(int fd, char* buff, ssize_t len) {
     return 0;
 }
 
-/*static int sAplayWait(const char* file) {
-    pid_t pid = fork();
-    if ( pid < 0) {
-        return -1;
-    }
-    if ( pid == 0) {
-        int rev = execl("/usr/bin/aplay", "/usr/bin/aplay", file ,(char*) NULL);
-        if ( rev == -1 ) {
-            printf("fork error:%s\n", strerror(errno));
-        }
-        _exit(1);
-     } else {
-        int status ;
-        waitpid(pid, &status, 0);
-    }
-
-    return pid;
-}*/
-
-
-
 static int sProcessCommand(char* msg, int len) {
     int filedes[2];
     if (pipe(filedes) == -1) {
@@ -423,21 +405,6 @@ static int sProcessCommand(char* msg, int len) {
     return status;
 }
 
-/*static int isBye(const char* msg) {
-    static char byebye[] = {0xe6, 0x8b, 0x9c, 0xe6, 0x8b, 0x9c, 0};
-    static char byebye2[] = {0xe6, 0x8e, 0xb0, 0xe6, 0x8e, 0xb0, 0};
-    if( msg ) {
-        char* index = NULL;
-        if ( (index = strstr( msg, byebye)) != NULL ) {
-            return 1;
-        }
-        if ( (index = strstr( msg, byebye2)) != NULL ) {
-            return 1;
-        }
-    }
-    return 0;
-}*/
-
 static void
 recognize_from_microphone()
 {
@@ -455,7 +422,6 @@ recognize_from_microphone()
     int samprate = (int) cmd_ln_float32_r(config, "-samprate");
 
     WavWriter *wavWriter = NULL;
-    WavPlayer player(1, samprate);
     if ( nodeFD == -1 ) {
         printf("Failed to open connect to node\n");
     }
@@ -475,14 +441,18 @@ recognize_from_microphone()
 
     for (;;) {
         //read data from rec, we need to check if there is any aplay request from node first
-        int needAplay = sGetAplayCommand(nodeFD, aplayCmd, 1024);
-        if ( needAplay ) {
-            ad_stop_rec(ad);
-            printf("receive aplay command:%s\n", aplayCmd);
-            player.play(aplayCmd);
-            ad_start_rec(ad);
+        if ( state != kCommand ) {
+            int needAplay = sGetAplayCommand(nodeFD, aplayCmd, 1024);
+            if ( needAplay ) {
+                ad_stop_rec(ad);
+                printf("receive aplay command:%s\n", aplayCmd);
+                {
+                    WavPlayer player(1, samprate);
+                    player.play(aplayCmd);
+                }
+                ad_start_rec(ad);
+            }
         }
-
         if ((k = ad_read(ad, adbuf, adbuflen)) < 0)
             E_FATAL("Failed to read audio\n");
 
@@ -510,7 +480,10 @@ recognize_from_microphone()
                     printf("keyword HUMIX found\n");
                     fflush(stdout);
                     ad_stop_rec(ad);
-                    player.play(wav_say);
+                    {
+                        WavPlayer player(1, samprate);
+                        player.play(wav_say);
+                    }
                     ad_start_rec(ad);
                     printf("Waiting for a command...");
                     humixCount = 0;
@@ -559,7 +532,10 @@ recognize_from_microphone()
                 printf("StT processing\n");
                 char msg[1024];
                 ad_stop_rec(ad);
-                player.play(wav_proc);
+                {
+                    WavPlayer player(1, samprate);
+                    player.play(wav_proc);
+                }
                 int result = sProcessCommand(msg, 1024);
                 if ( result == 0 ) {
                     printf("%s", msg);
