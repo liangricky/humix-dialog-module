@@ -1,3 +1,4 @@
+'use strict';
 var console = require('console');
 var config  = require('./config');
 var sys     = require('util');
@@ -65,7 +66,7 @@ function getConvertStatus(id, callback) {
                 //console.log('get download url: '+downloadUrl);
                 console.log(id + " " + downloadUrl);
                 var wav_file = path.join(voice_path, "text", id + ".wav");
-                execSync("wget "+ downloadUrl + " -O " + wav_file);
+                execSync("wget "+ downloadUrl + " -O " + wav_file, {stdio: [ 'ignore', 'ignore', 'ignooore' ]});
                 callback(null, id);
             } else {
                 var error = 'Still converting! result: '+JSON.stringify(result);
@@ -119,25 +120,32 @@ nats.subscribe('humix.sense.speech.command', text2Speech);
 
 function text2Speech(msg) {
     console.log('Received a message: ' + msg);
-    var text = JSON.parse(msg).text || undefined,
-        wav_file = '';
+    var text
+    var wav_file = '';
+    try {
+        text = JSON.parse(msg).text;
+    } catch (e) {
+        console.error('invalid JSON format');
+        return;
+    }
 
     if (!text) {
         return console.error('Missing property: msg.text');
     }
-
+    //for safe
+    text = text.trim();
     var hash = crypto.createHash('md5').update(text).digest('hex');
     console.log ("hash value: " + hash);
     if (wavehash.hasOwnProperty(hash)) {
         var wav_file = path.join(voice_path,"text", wavehash[hash] + ".wav");
         console.log('Play hash wav file: ' +  wav_file);
         sendAplay2HumixSpeech(connHumixSpeech, wav_file);
-    }
-    else {
+    } else {
         console.log("hash not found");
         convertText(text, hash, function(err, id, hashvalue) {
-            if (err) { console.log(err); }
-            else {
+            if (err) {
+                console.log(err); 
+            } else {
                 wavehash[hashvalue] = id;
                 retry = 0;
                 setTimeout(download, 1000, id);
@@ -178,7 +186,7 @@ function startHumixSpeech() {
             nats.publish('humix.sense.speech.event', cmd);
             console.error('command found:', cmd);
             //echo mode
-            //text2Speech( '{ "text" : "' + cmd + '" }' );
+            text2Speech( '{ "text" : "' + cmd + '" }' );
         }
     });
     speechProc.on('close', function(code) {
@@ -194,14 +202,16 @@ function startHumixSpeech() {
 
 startHumixSpeech();
 
-
 //register signal handlers to terminate the humix-speech process
 process.stdin.resume();
-process.on('SIGINT', function() {
+function cleanup() {
     if (speechProc) {
         speechProc.kill('SIGHUP');
         speechProc = undefined;
     }
+}
+process.on('SIGINT', function() {
+    cleanup();
     process.exit(0);
 });
 process.on('SIGHUP', function() {
@@ -212,14 +222,14 @@ process.on('SIGHUP', function() {
     process.exit(0);
 });
 process.on('SIGTERM', function() {
-    if (speechProc) {
-        speechProc.kill('SIGHUP');
-        speechProc = undefined;
-    }
+    cleanup();
     process.exit(0);
 });
 process.on('exit', function() {
-    if ( speechProc ) speechProc.kill('SIGHUP');
+    cleanup();
+});
+process.on('error', function() {
+    cleanup();
 });
 
 
@@ -233,7 +243,7 @@ process.on('exit', function() {
 //test code start here 
 //function testSendAplay() {
 //    console.error('send aplay');
-//    sendAplay2HumixSpeech(connHumixSpeech, '/home/yhwang/humix/humix-sense/controls/humix-sense-speech/voice/interlude/what.wav');
+//    sendAplay2HumixSpeech(connHumixSpeech, 'voice/interlude/what.wav');
 //    setTimeout(testSendAplay, 5000);
 //}
 //setTimeout(testSendAplay, 5000);
