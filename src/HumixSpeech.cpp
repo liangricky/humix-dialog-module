@@ -121,7 +121,7 @@ void WavWriter::writeData(const char* data, size_t size) {
 class WavPlayer {
 public:
     WavPlayer(const char *filename) {
-        unsigned int pcm = 0;
+        int pcm = 0;
         int dir = 0;
         snd_pcm_hw_params_t *params;
         mHandle = NULL;
@@ -310,6 +310,9 @@ private:
     static void sLoop(void* arg);
     int processCommand(char* msg, int len);
 
+    static void sReceiveCmd(uv_async_t* handle);
+    static void sFreeHandle(uv_handle_t* handle);
+
     State mState;
     ps_decoder_t *mPSDecoder;
     cmd_ln_t *mConfig;
@@ -324,6 +327,7 @@ private:
     uv_thread_t mThread;
     v8::Persistent<v8::Function> mCB;
     std::queue<std::string> mAplayFiles;
+    std::queue<std::string> mCommands;
 };
 
 static char* sGetObjectPropertyAsString(
@@ -333,7 +337,9 @@ static char* sGetObjectPropertyAsString(
         const char* defaultValue) {
 
     v8::Local<v8::Value> valObj;
-    if ( obj->Get(ctx, Nan::New(name).ToLocalChecked()).ToLocal(&valObj) ) {
+    if ( obj->Get(ctx, Nan::New(name).ToLocalChecked()).ToLocal(&valObj) &&
+            !valObj->IsUndefined() &&
+            !valObj->IsNull()) {
         v8::String::Utf8Value val(valObj);
         return strdup(*val);
     } else {
@@ -364,16 +370,17 @@ HumixSpeech::HumixSpeech(const v8::FunctionCallbackInfo<v8::Value>& args)
         v8::Local<v8::Value> valObj;
         if ( props->Get(ctx, i).ToLocal(&valObj) ) {
             //option: need to add '-' prefix as an option
-            v8::String::Utf8Value val(valObj);
-            char* p = mArgv[counter++];
-            p = (char*)malloc(val.length() + 2);
-            sprintf(p, "-%s", *val);
+            v8::String::Utf8Value name(valObj);
+            char** p = mArgv + counter++;
+            *p = (char*)malloc(name.length() + 2);
+            sprintf(*p, "-%s", *name);
             if ( config->Get(ctx, valObj).ToLocal(&valObj) &&
                     !valObj->IsNull() &&
                     !valObj->IsUndefined()) {
                 //option value
-                p = mArgv[counter++];
-                p = strdup(*val);
+                v8::String::Utf8Value val(valObj);
+                p = mArgv + counter++;
+                *p = strdup(*val);
             }
         }
     }
@@ -463,7 +470,6 @@ void HumixSpeech::sStart(const v8::FunctionCallbackInfo<v8::Value>& info) {
 
 void
 HumixSpeech::start(const v8::FunctionCallbackInfo<v8::Value>& info) {
-    Ref();
     mCB.Reset(info.GetIsolate(), info[0].As<v8::Function>());
     uv_thread_create(&mThread, sLoop, this);
 }
@@ -487,7 +493,6 @@ void HumixSpeech::sStop(const v8::FunctionCallbackInfo<v8::Value>& info) {
 
 void
 HumixSpeech::stop(const v8::FunctionCallbackInfo<v8::Value>& info) {
-    Unref();
     mCB.Reset();
     mState = kStop;
     uv_thread_join(&mThread);
@@ -647,7 +652,12 @@ void HumixSpeech::sLoop(void* arg) {
                     }
                     int result = _this->processCommand(msg, 1024);
                     if (result == 0) {
-                        printf("%s", msg);
+                        uv_async_t* async = new uv_async_t;
+                        async->data = _this;
+                        _this->mCommands.push(msg);
+                        uv_async_init(uv_default_loop(), async,
+                                HumixSpeech::sReceiveCmd);
+                        uv_async_send(async);
                     } else {
                         printf("No command found!");
                     }
@@ -667,6 +677,32 @@ void HumixSpeech::sLoop(void* arg) {
         sleep_msec(20);
     }
     ad_close(ad);
+}
+
+/*static*/
+void HumixSpeech::sReceiveCmd(uv_async_t* async) {
+    v8::Isolate* isolate = v8::Isolate::GetCurrent();
+    v8::HandleScope scope(isolate);
+    v8::Local<v8::Context> ctx = isolate->GetCurrentContext();
+
+    HumixSpeech* _this = (HumixSpeech*)async->data;
+    if ( !_this->mCB.IsEmpty() ) {
+        while( _this->mCommands.size() > 0) {
+            std::string cmd = _this->mCommands.front();
+            _this->mCommands.pop();
+            v8::Local<v8::Value> argv[] = { Nan::New(cmd.c_str()).ToLocalChecked() };
+            v8::Local<v8::Function> func = v8::Local<v8::Function>::New(isolate, _this->mCB);
+            func->CallAsFunction(ctx, ctx->Global(), 1, argv);
+        }
+    }
+
+    uv_close(reinterpret_cast<uv_handle_t*>(async), HumixSpeech::sFreeHandle);
+}
+
+/*static*/
+void
+HumixSpeech::sFreeHandle(uv_handle_t* handle) {
+    delete handle;
 }
 
 /*static*/
@@ -722,14 +758,15 @@ int HumixSpeech::processCommand(char* msg, int len) {
 
 
 
-NAN_MODULE_INIT(InitModule) {
+void InitModule(v8::Local<v8::Object> target) {
     v8::Isolate* isolate = v8::Isolate::GetCurrent();
     Nan::HandleScope scope;
     v8::Local<v8::Context> ctx = isolate->GetCurrentContext();
 
     v8::Local<v8::FunctionTemplate> ft = HumixSpeech::sFunctionTemplate(isolate);
+
     target->Set(ctx, Nan::New("HumixSpeech").ToLocalChecked(),
             ft->GetFunction(ctx).ToLocalChecked());
 }
 
-NODE_MODULE_CONTEXT_AWARE(HumixSpeech, InitModule)
+NODE_MODULE(HumixSpeech, InitModule);

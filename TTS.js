@@ -11,6 +11,7 @@ var net     = require('net');
 var fs      = require('fs');
 var Buffer  = require('buffer').Buffer;
 var path    = require('path');
+var HumixSpeech = require('./lib/HumixSpeech').HumixSpeech;
 
 var voice_path = path.join(__dirname, 'voice');
 var url = 'http://tts.itri.org.tw/TTSService/Soap_1_3.php?wsdl';
@@ -157,63 +158,34 @@ function text2Speech(msg) {
     }
 }
 
-//create domain socket before fork humix-speech
-try {
-    fs.unlinkSync('/tmp/humix-speech-socket'); //remove domain socket if there is
-} catch ( e ) {}
-var server = net.createServer(function(conn) { //'connection' listener
-    conn.on('end', function() {
-        console.log('humix-speech disconnected');
-    });
-    console.error('humix-speech connected');
-    connHumixSpeech = conn;
-});
-
-server.listen('/tmp/humix-speech-socket', function() { //'listening' listener
-    console.log('ready for humix-speech to hook up');
-});
-
+var hs;
 var commandRE = /---="(.*)"=---/;
-var prefix = '---="';
-var speechProc = undefined;
-//use child process to handle speech to text
-function startHumixSpeech() {
-    speechProc = exec(config.speechCmd + ' ' + config.args.join(' '),  {maxBuffer: 1024 * 500}, function (error) {
-        console.error(error);
-    });
-    speechProc.stdout.on('data', function (data) {
-        process.stdout.write(data);
-        var match = commandRE.exec(data);
-        if ( match && match.length == 2 ) {
-            var cmd = match[1];
-            nats.publish('humix.sense.speech.event', cmd);
-            console.error('command found:', cmd);
-            //echo mode
-            //text2Speech( '{ "text" : "' + cmd + '" }' );
-            if ( cmd.indexOf('聖誕') != -1 && cmd.indexOf('快樂') != -1 ) {
-                sendAplay2HumixSpeech(connHumixSpeech, 'voice/music/jingle_bells.wav');
-            } 
+function receiveCommand(cmdstr) {
+    cmdstr = cmdstr.trim();
+    var match = commandRE.exec(cmdstr);
+    if ( match && match.length == 2 ) {
+        var cmd = match[1];
+        nats.publish('humix.sense.speech.event', cmd);
+        console.error('command found:', cmd);
+        //echo mode
+        //text2Speech( '{ "text" : "' + cmd + '" }' );
+        if ( hs && cmd.indexOf('聖誕') != -1 && cmd.indexOf('快樂') != -1 ) {
+            hs.play('./voice/music/jingle_bells.wav');
         }
-    });
-    speechProc.on('close', function(code) {
-        console.error('speech proc finished with code:' + code);
-        speechProc = undefined;
-        process.nextTick(startHumixSpeech);
-    });
-
-    speechProc.on('error', function (error) {
-        console.error(error);
-    });
+    }
 }
 
-startHumixSpeech();
+try {
+    hs = new HumixSpeech(config.options);
+    hs.start(receiveCommand);
+} catch ( error ) {
+    console.error(error);    
+}
 
-//register signal handlers to terminate the humix-speech process
 process.stdin.resume();
 function cleanup() {
-    if (speechProc) {
-        speechProc.kill('SIGHUP');
-        speechProc = undefined;
+    if (hs) {
+        hs.stop();
     }
 }
 process.on('SIGINT', function() {
@@ -221,10 +193,7 @@ process.on('SIGINT', function() {
     process.exit(0);
 });
 process.on('SIGHUP', function() {
-    if (speechProc) {
-        speechProc.kill('SIGHUP');
-        speechProc = undefined;
-    }
+    cleanup();
     process.exit(0);
 });
 process.on('SIGTERM', function() {
