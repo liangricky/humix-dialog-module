@@ -3,3 +3,4 @@ deps
 humix-speech
 humix-speech.o
 voice/text/*.wav
+build
