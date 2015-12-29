@@ -1,5 +1,5 @@
 node_modules
 deps
-humix-speech
-humix-speech.o
+build
+lib/HumixSpeech.node
 voice/text/*.wav
