@@ -8,6 +8,7 @@ HUMIXMODULE=lib/HumixSpeech.node
 all: $(HUMIXMODULE)
 #-Wl,--start-group xxxx.a. xxxx.a xxx.a -Wl,--end-group is used to resolve the circular dependencies
 $(HUMIXMODULE): $(OBJ_SPHINXBASE) $(OBJ_SPHINXAD) $(OBJ_POCKETSPHINX) src/HumixSpeech.cpp
+	node-gyp configure
 	node-gyp build
 	
 $(OBJ_SPHINXBASE): deps
