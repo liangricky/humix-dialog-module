@@ -1,2 +1,0 @@
-#!/bin/sh
-./humix-speech -vad_threshold 4 -upperf 1000 -hmm /usr/local/share/pocketsphinx/model/en-us/en-us -lm /home/liuch/workspace/humix/humix-sense/controls/humix-sense-speech/humix.lm -dict /home/liuch/workspace/humix/humix-sense/controls/humix-sense-speech/humix.dic -samprate 16000 -cmdproc /home/liuch/workspace/humix/humix-sense/controls/humix-sense-speech/processcmd.sh -lang zh-tw 2>/dev/null
