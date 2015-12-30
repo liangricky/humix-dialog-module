@@ -13,7 +13,6 @@
 * See the License for the specific language governing permissions and
 * limitations under the License.
 *******************************************************************************/
-
 'use strict';
 var console = require('console');
 var config  = require('./lib/config');
@@ -31,10 +30,6 @@ var HumixSpeech = require('./lib/HumixSpeech').HumixSpeech;
 
 var voice_path = path.join(__dirname, 'voice');
 var url = 'http://tts.itri.org.tw/TTSService/Soap_1_3.php?wsdl';
-var connHumixSpeech = null;
-
-
-function puts(error, stdout, stderr) {sys.puts(stdout)}
 
 function convertText(text, hash, callback) {
     var args = {
@@ -86,7 +81,7 @@ function getConvertStatus(id, callback) {
                 //console.log('get download url: '+downloadUrl);
                 console.log(id, downloadUrl);
                 var wav_file = path.join(voice_path, 'text', id + '.wav');
-                execSync('wget '+ downloadUrl + ' -O ' + wav_file, {stdio: [ 'ignore', 'ignore', 'ignooore' ]});
+                execSync('wget '+ downloadUrl + ' -O ' + wav_file, {stdio: [ 'ignore', 'ignore', 'ignore' ]});
                 callback(null, id);
             } else {
                 var error = 'Still converting! result: '+JSON.stringify(result);
@@ -115,28 +110,67 @@ function download (id) {
         {
            var wav_file = path.join(voice_path,'text', result + '.wav');
            console.log('Play wav file:', wav_file);
-           sendAplay2HumixSpeech(connHumixSpeech, wav_file);
+           sendAplay2HumixSpeech(wav_file);
         }
     });
 }
 
+//start HumixSpeech here
+var hs;
+var commandRE = /---="(.*)"=---/;
 
-function sendAplay2HumixSpeech( conn, file ) {
-    if ( !conn || !file ) {
-        return;
+/**
+ * callback function that is called when
+ * HumixSpeech detect a valid command/sentence
+ * @param cmdstr a command/sentence in this format:
+ *         '----="command string"=---'
+ */
+function receiveCommand(cmdstr) {
+    cmdstr = cmdstr.trim();
+    var match = commandRE.exec(cmdstr);
+    if ( match && match.length == 2 ) {
+        var cmd = match[1];
+        console.error('command found:', cmd);
+        try {
+            nats.publish('humix.sense.speech.event', cmd);
+        } catch ( e ) {
+            console.error('can not publish to nats:', e);
+        }
+        //echo mode
+        //text2Speech( '{ "text" : "' + cmd + '" }' );
+        if ( hs && cmd.indexOf('聖誕') != -1 && cmd.indexOf('快樂') != -1 ) {
+            hs.play('./voice/music/jingle_bells.wav');
+        }
     }
-    var len = 4 + 1 + file.length; //uint32_t, uint8_t, string
-    var msg = new Buffer(len);
-    msg.writeUInt32LE(len - 4, 0);
-    msg.writeUInt8(1, 4);// 1- aplay, 2 - xxxx
-    msg.write(file, 5);
-    conn.write(msg);
+}
+
+try {
+    hs = new HumixSpeech(config.options);
+    hs.start(receiveCommand);
+} catch ( error ) {
+    console.error(error);
+}
+
+/**
+ * call the underlying HumixSpeech to play wave file
+ * @param file wave file
+ */
+function sendAplay2HumixSpeech( file ) {
+    if( hs ) {
+        hs.play(file);
+    }
 }
 
 var msg = '';
 var wavehash = new Object();
-// subscribe events
-nats.subscribe('humix.sense.speech.command', text2Speech);
+/**
+ * a simple function to perform the nats subscription
+ */
+function subscribe(  ) {
+    nats.subscribe('humix.sense.speech.command', text2Speech);
+}
+
+subscribe();
 
 function text2Speech(msg) {
     console.log('Received a message:', msg);
@@ -159,7 +193,7 @@ function text2Speech(msg) {
     if (wavehash.hasOwnProperty(hash)) {
         var wav_file = path.join(voice_path,'text', wavehash[hash] + '.wav');
         console.log('Play hash wav file:', wav_file);
-        sendAplay2HumixSpeech(connHumixSpeech, wav_file);
+        sendAplay2HumixSpeech(wav_file);
     } else {
         console.log('hash not found');
         convertText(text, hash, function(err, id, hashvalue) {
@@ -172,30 +206,6 @@ function text2Speech(msg) {
             }
         });
     }
-}
-
-var hs;
-var commandRE = /---="(.*)"=---/;
-function receiveCommand(cmdstr) {
-    cmdstr = cmdstr.trim();
-    var match = commandRE.exec(cmdstr);
-    if ( match && match.length == 2 ) {
-        var cmd = match[1];
-        nats.publish('humix.sense.speech.event', cmd);
-        console.error('command found:', cmd);
-        //echo mode
-        //text2Speech( '{ "text" : "' + cmd + '" }' );
-        if ( hs && cmd.indexOf('聖誕') != -1 && cmd.indexOf('快樂') != -1 ) {
-            hs.play('./voice/music/jingle_bells.wav');
-        }
-    }
-}
-
-try {
-    hs = new HumixSpeech(config.options);
-    hs.start(receiveCommand);
-} catch ( error ) {
-    console.error(error);    
 }
 
 process.stdin.resume();
@@ -223,18 +233,25 @@ process.on('error', function() {
     cleanup();
 });
 
+process.on('uncaughtException', function(err) {
+    if ( err.toString().indexOf('connect ECONNREFUSED') ) {
+        console.error('nats connection failed');
+        cleanup();
+        process.exit(0);
+    }
+});
 
 //setTimeout(function () {
-//    sendAplay2HumixSpeech(connHumixSpeech, 'voice/interlude/pleasesay1.wav');
+//    sendAplay2HumixSpeech('voice/interlude/pleasesay1.wav');
     //text2Speech( '{ "text" : "Text to Speech" }' );
 //}, 5000);
 //setTimeout(function () {
-//    sendAplay2HumixSpeech(connHumixSpeech, 'voice/interlude/pleasesay2.wav');
+//    sendAplay2HumixSpeech('voice/interlude/pleasesay2.wav');
 //}, 8000);
 //test code start here 
 //function testSendAplay() {
 //    console.error('send aplay');
-//    sendAplay2HumixSpeech(connHumixSpeech, 'voice/interlude/what.wav');
+//    sendAplay2HumixSpeech('voice/interlude/what.wav');
 //    setTimeout(testSendAplay, 5000);
 //}
 //setTimeout(testSendAplay, 5000);
