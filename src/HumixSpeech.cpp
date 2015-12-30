@@ -369,7 +369,7 @@ HumixSpeech::HumixSpeech(const v8::FunctionCallbackInfo<v8::Value>& args)
     v8::Local<v8::Context> ctx = args.GetIsolate()->GetCurrentContext();
     mState = kReady;
 
-    mCMDProc = sGetObjectPropertyAsString(ctx, config, "cmdproc", "./processcmd.sh");
+    mCMDProc = sGetObjectPropertyAsString(ctx, config, "cmdproc", "./util/processcmd.sh");
     mWavSay =  sGetObjectPropertyAsString(ctx, config, "wav-say", "./voice/interlude/pleasesay1.wav");
     mWavProc =  sGetObjectPropertyAsString(ctx, config, "wav-say", "./voice/interlude/process1.wav");
     mWavBye =  sGetObjectPropertyAsString(ctx, config, "wav-bye", "./voice/interlude/bye.wav");

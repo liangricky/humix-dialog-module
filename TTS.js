@@ -16,7 +16,7 @@
 
 'use strict';
 var console = require('console');
-var config  = require('./config');
+var config  = require('./lib/config');
 var sys     = require('util');
 var nats    = require('nats').connect();
 var exec    = require('child_process').exec;
