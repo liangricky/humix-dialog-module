@@ -11,23 +11,19 @@ $(HUMIXMODULE): $(OBJ_SPHINXBASE) $(OBJ_SPHINXAD) $(OBJ_POCKETSPHINX) src/HumixS
 	node-gyp configure
 	node-gyp build
 	
-$(OBJ_SPHINXBASE): deps
+$(OBJ_SPHINXBASE):
+	mkdir deps
 	tar -xf sphinxbase-$(SPHINXBASE_VER).tar.gz -C deps
-	#cd deps/sphinxbase-$(SPHINXBASE_VER); ./configure --enable-fixed
 	cd deps/sphinxbase-$(SPHINXBASE_VER); export CFLAGS=" -g -O2 -Wall -fPIC"; ./configure --enable-fixed
-	make -C deps/sphinxbase-$(SPHINXBASE_VER)
+	make -C deps/sphinxbase-$(SPHINXBASE_VER)/src/libsphinxbase
+	make -C deps/sphinxbase-$(SPHINXBASE_VER)/src/libsphinxad
 
 $(OBJ_SPHINXAD): $(OBJ_SPHINXBASE)
 
 $(OBJ_POCKETSPHINX): deps $(OBJ_SPHINXBASE)
 	tar -xf pocketsphinx-$(POCKETSPHINX_VER).tar.gz -C deps
-	#cd deps/pocketsphinx-$(POCKETSPHINX_VER); ./configure
 	cd deps/pocketsphinx-$(POCKETSPHINX_VER); export CFLAGS=" -g -O2 -Wall -fPIC"; ./configure
-	make -C deps/pocketsphinx-$(POCKETSPHINX_VER)
-
-deps:
-	mkdir deps
-	mkdir build
+	make -C deps/pocketsphinx-$(POCKETSPHINX_VER)/src/libpocketsphinx
 
 clean:
 	rm -rf deps build $(OBJ_HUMIXSPEECH) $(HUMIXMODULE)
