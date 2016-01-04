@@ -298,6 +298,137 @@ static const arg_t cont_args_def[] = {
     CMDLN_EMPTY_OPTION
 };
 
+class WatsonTTS {
+public:
+    WatsonTTS(const char* username, const char* passwd, v8::Local<v8::Function> func);
+    ~WatsonTTS();
+
+    class WriteData {
+    public:
+        WriteData(const char* data, uint32_t size, WatsonTTS* tts) {
+            mData = (char*)malloc(size);
+            memcpy(mData, data, size);
+            mSize = size;
+            mThis = tts;
+        }
+        ~WriteData() {
+            free (mData);
+        }
+        char* mData;
+        uint32_t mSize;
+        WatsonTTS* mThis;
+    };
+    void WSConnect();
+    void setCB(v8::Local<v8::Function> cb) {
+        mCB.Reset(cb->CreationContext()->GetIsolate(), cb);
+    }
+    void stop();
+    void write(WriteData* data);
+    void writeToMainLoop(char* data, uint32_t length);
+private:
+
+    static void sStart(uv_async_t* handle);
+    static void sWrite(uv_async_t* handle);
+    static void sFreeHandle(uv_handle_t* handle);
+    static void sFreeCallback(char* data, void* hint);
+    void connect();
+
+    char* mUserName;
+    char* mPasswd;
+    v8::Persistent<v8::Object> mObj;
+    v8::Persistent<v8::Function> mFunc;
+    v8::Persistent<v8::Function> mCB;
+};
+
+WatsonTTS::WatsonTTS(const char* username, const char* passwd, v8::Local<v8::Function> func)
+    : mUserName(strdup(username)), mPasswd(strdup(passwd)){
+    mFunc.Reset(func->CreationContext()->GetIsolate(), func);
+}
+
+WatsonTTS::~WatsonTTS() {
+    free(mUserName);
+    free(mPasswd);
+    mObj.Reset();
+    mFunc.Reset();
+    mCB.Reset();
+}
+
+void
+WatsonTTS::connect() {
+    v8::Isolate* isolate = v8::Isolate::GetCurrent();
+    v8::HandleScope scope(isolate);
+    v8::Local<v8::Context> ctx = isolate->GetCurrentContext();
+    v8::Local<v8::Function> func = v8::Local<v8::Function>::New(isolate, mFunc);
+    v8::Local<v8::Function> cb = v8::Local<v8::Function>::New(isolate, mCB);
+    v8::Local<v8::String> username = v8::String::NewFromUtf8(isolate, mUserName);
+    v8::Local<v8::String> passwd = v8::String::NewFromUtf8(isolate, mPasswd);
+    v8::Local<v8::Value> args[] = { username, passwd, cb };
+    v8::Local<v8::Value> rev;
+    if ( func->Call(ctx, ctx->Global(),3, args).ToLocal(&rev) ) {
+        mObj.Reset(isolate, rev->ToObject(ctx).ToLocalChecked());
+    }
+    //TODO register 'connect' event to get connection object
+    //then use it when calling the stop()
+}
+
+/*static*/
+void WatsonTTS::sFreeHandle(uv_handle_t* handle) {
+    delete handle;
+}
+
+/*static*/
+void WatsonTTS::sStart(uv_async_t* handle) {
+    WatsonTTS* _this = (WatsonTTS*)handle->data;
+    _this->connect();
+    uv_close(reinterpret_cast<uv_handle_t*>(handle), sFreeHandle);
+}
+
+/*static*/
+void WatsonTTS::sWrite(uv_async_t* handle) {
+    WriteData* wd = (WriteData*)handle->data;
+    wd->mThis->write(wd);
+    uv_close(reinterpret_cast<uv_handle_t*>(handle), sFreeHandle);
+}
+
+void
+WatsonTTS::WSConnect() {
+    uv_async_t* async = new uv_async_t;
+    async->data = this;
+    uv_async_init(uv_default_loop(), async,
+            sStart);
+    uv_async_send(async);
+}
+
+void
+WatsonTTS::write(WriteData* data) {
+    v8::Isolate* isolate = v8::Isolate::GetCurrent();
+    v8::HandleScope scope(isolate);
+    if ( mObj.IsEmpty() ) {
+        return;
+    }
+    v8::Local<v8::Object> obj = v8::Local<v8::Object>::New(isolate, mObj);
+    v8::Local<v8::Object> buff;
+    if ( Nan::NewBuffer(data->mData, data->mSize, sFreeCallback, data).ToLocal(&buff) ) {
+        v8::Local<v8::Value> args[] = { buff };
+        Nan::MakeCallback(obj, "write", 1, args);
+    }
+}
+
+/*static*/
+void WatsonTTS::sFreeCallback(char* data, void* hint) {
+    WriteData* wd = (WriteData*)hint;
+    delete wd;
+}
+
+void
+WatsonTTS::writeToMainLoop(char* data, uint32_t length) {
+    uv_async_t* async = new uv_async_t;
+    async->data = new WriteData(data, length, this);
+    uv_async_init(uv_default_loop(), async,
+            sWrite);
+    uv_async_send(async);
+}
+
 class HumixSpeech : public Nan::ObjectWrap{
 public:
     HumixSpeech(const v8::FunctionCallbackInfo<v8::Value>& args);
@@ -318,6 +449,7 @@ private:
     static void sStart(const v8::FunctionCallbackInfo<v8::Value>& info);
     static void sPlay(const v8::FunctionCallbackInfo<v8::Value>& info);
     static void sStop(const v8::FunctionCallbackInfo<v8::Value>& info);
+    static void sEnableWatson(const v8::FunctionCallbackInfo<v8::Value>& info);
 
     void start(const v8::FunctionCallbackInfo<v8::Value>& info);
     void stop(const v8::FunctionCallbackInfo<v8::Value>& info);
@@ -341,9 +473,12 @@ private:
     int mArgc;
     char** mArgv;
     uv_thread_t mThread;
+    uv_mutex_t mAplayMutex;
+    uv_mutex_t mCommandMutex;
     v8::Persistent<v8::Function> mCB;
     std::queue<std::string> mAplayFiles;
     std::queue<std::string> mCommands;
+    WatsonTTS* mWatsonTTS;
 };
 
 static char* sGetObjectPropertyAsString(
@@ -414,6 +549,9 @@ HumixSpeech::HumixSpeech(const v8::FunctionCallbackInfo<v8::Value>& args)
         mConfig = NULL;
         args.GetIsolate()->ThrowException(v8::Exception::Error(Nan::New("Can't initialize ps").ToLocalChecked()));
     }
+    uv_mutex_init(&mAplayMutex);
+    uv_mutex_init(&mCommandMutex);
+    mWatsonTTS = NULL;
     Wrap(args.This());
 }
 
@@ -442,6 +580,11 @@ HumixSpeech::~HumixSpeech() {
             }
         }
         free(mArgv);
+    }
+    uv_mutex_destroy(&mAplayMutex);
+    uv_mutex_destroy(&mCommandMutex);
+    if ( mWatsonTTS ) {
+        delete mWatsonTTS;
     }
     mCB.Reset();
 }
@@ -486,7 +629,11 @@ void HumixSpeech::sStart(const v8::FunctionCallbackInfo<v8::Value>& info) {
 
 void
 HumixSpeech::start(const v8::FunctionCallbackInfo<v8::Value>& info) {
-    mCB.Reset(info.GetIsolate(), info[0].As<v8::Function>());
+    v8::Local<v8::Function> cb = info[0].As<v8::Function>();
+    if ( mWatsonTTS ) {
+        mWatsonTTS->setCB(cb);
+    }
+    mCB.Reset(info.GetIsolate(), cb);
     uv_thread_create(&mThread, sLoop, this);
 }
 
@@ -531,11 +678,33 @@ void HumixSpeech::sPlay(const v8::FunctionCallbackInfo<v8::Value>& info) {
     hs->play(info);
 }
 
-
 void
 HumixSpeech::play(const v8::FunctionCallbackInfo<v8::Value>& info) {
     v8::String::Utf8Value filename(info[0]);
+    uv_mutex_lock(&mAplayMutex);
     mAplayFiles.push(*filename);
+    uv_mutex_unlock(&mAplayMutex);
+}
+
+/*static*/
+void HumixSpeech::sEnableWatson(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    HumixSpeech* hs = Unwrap<HumixSpeech>(info.Holder());
+    if ( hs == nullptr ) {
+        info.GetIsolate()->ThrowException(v8::Exception::ReferenceError(
+                Nan::New("Not a HumixSpeech object").ToLocalChecked()));
+        return;
+    }
+
+    if ( info.Length() != 3 || !info[0]->IsString() ||
+            !info[1]->IsString() || !info[2]->IsFunction()) {
+        info.GetIsolate()->ThrowException(v8::Exception::SyntaxError(
+                Nan::New("Usage: enableWatson(username, passwd, function)").ToLocalChecked()));
+        return;
+    }
+
+    v8::String::Utf8Value username(info[0]);
+    v8::String::Utf8Value passwd(info[1]);
+    hs->mWatsonTTS = new WatsonTTS(*username, *passwd, info[2].As<v8::Function>());
 }
 
 /*static*/
@@ -572,6 +741,7 @@ void HumixSpeech::sLoop(void* arg) {
     for (; _this->mState != kStop ;) {
         //read data from rec, we need to check if there is any aplay request from node first
         if (_this->mState != kCommand) {
+            uv_mutex_lock(&(_this->mAplayMutex));
             if (!_this->mAplayFiles.empty()) {
                 ad_stop_rec(ad);
                 std::string file = _this->mAplayFiles.front();
@@ -582,6 +752,7 @@ void HumixSpeech::sLoop(void* arg) {
                 }
                 ad_start_rec(ad);
             }
+            uv_mutex_unlock(&(_this->mAplayMutex));
         }
         if ((k = ad_read(ad, adbuf, adbuflen)) < 0)
             E_FATAL("Failed to read audio\n");
@@ -609,6 +780,9 @@ void HumixSpeech::sLoop(void* arg) {
                         _this->mState = kWaitCommand;
                         printf("keyword HUMIX found\n");
                         fflush(stdout);
+                        if (_this->mWatsonTTS ) {
+                            _this->mWatsonTTS->WSConnect();
+                        }
                         ad_stop_rec(ad);
                         {
                             WavPlayer player(_this->mWavSay);
@@ -629,9 +803,13 @@ void HumixSpeech::sLoop(void* arg) {
                 if (in_speech) {
                     printf("Listening the command...\n");
                     _this->mState = kCommand;
-                    wavWriter = new WavWriter("/dev/shm/test.wav", 1, samprate);
-                    wavWriter->writeHeader();
-                    wavWriter->writeData((char*) adbuf, (size_t) (k * 2));
+                    if ( _this->mWatsonTTS ) {
+                        _this->mWatsonTTS->writeToMainLoop((char*) adbuf, (uint32_t) (k * 2));
+                    } else {
+                        wavWriter = new WavWriter("/dev/shm/test.wav", 1, samprate);
+                        wavWriter->writeHeader();
+                        wavWriter->writeData((char*) adbuf, (size_t) (k * 2));
+                    }
                 } else {
                     //increase waiting count;
                     if (++waitCount > 100) {
@@ -652,11 +830,19 @@ void HumixSpeech::sLoop(void* arg) {
             case kCommand:
                 if (in_speech) {
                     //keep receiving command
-                    wavWriter->writeData((char*) adbuf, (size_t) (k * 2));
+                    if ( _this->mWatsonTTS ) {
+                        _this->mWatsonTTS->writeToMainLoop((char*) adbuf, (uint32_t) (k * 2));
+                    } else {
+                        wavWriter->writeData((char*) adbuf, (size_t) (k * 2));
+                    }
                 } else {
-                    wavWriter->writeData((char*) adbuf, (size_t) (k * 2));
-                    delete wavWriter;
-                    wavWriter = NULL;
+                    if ( _this->mWatsonTTS ) {
+                        _this->mWatsonTTS->writeToMainLoop((char*) adbuf, (uint32_t) (k * 2));
+                    } else {
+                        wavWriter->writeData((char*) adbuf, (size_t) (k * 2));
+                        delete wavWriter;
+                        wavWriter = NULL;
+                    }
                     //start to process command
                     ps_end_utt(ps);
                     printf("StT processing\n");
@@ -666,16 +852,20 @@ void HumixSpeech::sLoop(void* arg) {
                         WavPlayer player(_this->mWavProc);
                         player.play();
                     }
-                    int result = _this->processCommand(msg, 1024);
-                    if (result == 0) {
-                        uv_async_t* async = new uv_async_t;
-                        async->data = _this;
-                        _this->mCommands.push(msg);
-                        uv_async_init(uv_default_loop(), async,
-                                HumixSpeech::sReceiveCmd);
-                        uv_async_send(async);
-                    } else {
-                        printf("No command found!");
+                    if ( !_this->mWatsonTTS ) {
+                        int result = _this->processCommand(msg, 1024);
+                        if (result == 0) {
+                            uv_async_t* async = new uv_async_t;
+                            async->data = _this;
+                            uv_mutex_lock(&(_this->mCommandMutex));
+                            _this->mCommands.push(msg);
+                            uv_mutex_unlock(&(_this->mCommandMutex));
+                            uv_async_init(uv_default_loop(), async,
+                                    HumixSpeech::sReceiveCmd);
+                            uv_async_send(async);
+                        } else {
+                            printf("No command found!");
+                        }
                     }
                     //once we got command, reset humix-loop
                     humixCount = 0;
@@ -703,6 +893,7 @@ void HumixSpeech::sReceiveCmd(uv_async_t* async) {
 
     HumixSpeech* _this = (HumixSpeech*)async->data;
     if ( !_this->mCB.IsEmpty() ) {
+        uv_mutex_lock(&(_this->mCommandMutex));
         while( _this->mCommands.size() > 0) {
             std::string cmd = _this->mCommands.front();
             _this->mCommands.pop();
@@ -710,6 +901,7 @@ void HumixSpeech::sReceiveCmd(uv_async_t* async) {
             v8::Local<v8::Function> func = v8::Local<v8::Function>::New(isolate, _this->mCB);
             func->CallAsFunction(ctx, ctx->Global(), 1, argv);
         }
+        uv_mutex_unlock(&(_this->mCommandMutex));
     }
 
     uv_close(reinterpret_cast<uv_handle_t*>(async), HumixSpeech::sFreeHandle);
@@ -732,6 +924,8 @@ v8::Local<v8::FunctionTemplate> HumixSpeech::sFunctionTemplate(
     NODE_SET_PROTOTYPE_METHOD(tmpl, "start", sStart);
     NODE_SET_PROTOTYPE_METHOD(tmpl, "stop", sStop);
     NODE_SET_PROTOTYPE_METHOD(tmpl, "play", sPlay);
+    NODE_SET_PROTOTYPE_METHOD(tmpl, "enableWatson", sEnableWatson);
+
     return scope.Escape(tmpl);
 }
 

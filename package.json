@@ -22,7 +22,8 @@
   "dependencies": {
     "logule": "^2.0.1",
     "nats": "^0.2.9",
-    "soap": "^0.9.1"
+    "soap": "^0.9.1",
+    "watson-developer-cloud": "^1.1.2"
   },
   "devDependencies": {
     "nan": "^2.1.0",

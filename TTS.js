@@ -146,6 +146,10 @@ function receiveCommand(cmdstr) {
 
 try {
     hs = new HumixSpeech(config.options);
+    if ( config.enableWatson ) {
+        console.error('enable watson');
+        hs.enableWatson( config.watson.username, config.watson.passwd, require('./lib/watson').startSession);
+    }
     hs.start(receiveCommand);
 } catch ( error ) {
     console.error(error);
@@ -235,7 +239,7 @@ process.on('error', function() {
 
 process.on('uncaughtException', function(err) {
     if ( err.toString().indexOf('connect ECONNREFUSED') ) {
-        console.error('nats connection failed');
+        console.error('exception,', JSON.stringify(err));
         cleanup();
         process.exit(0);
     }
