@@ -71,7 +71,7 @@ public:
         mFormatType = 1;
         mNumberOfChannels = channel;
         mSampleRate = sample;
-        mBytesPerSecond = sample * channel * 16 / 8;
+        mBytesPerSecond = sample * channel * 16 / 8;//(Sample Rate * Bit Size * Channels) / 8
         mBytesPerFrame = channel * 16 / 8;
         mBitsPerSample = 16;
         mFilename = strdup(filename);
@@ -308,6 +308,11 @@ public:
         WriteData(const char* data, uint32_t size, WatsonTTS* tts) {
             mData = (char*)malloc(size);
             memcpy(mData, data, size);
+            for ( uint32_t i = 0; i < size ; i+=2) {
+                char t = mData[i];
+                mData[i] = mData[i+1];
+                mData[i+1] = t;
+            }
             mSize = size;
             mThis = tts;
         }
@@ -318,23 +323,28 @@ public:
         uint32_t mSize;
         WatsonTTS* mThis;
     };
+    /**
+     * create ws connection
+     */
     void WSConnect();
     void setCB(v8::Local<v8::Function> cb) {
         mCB.Reset(cb->CreationContext()->GetIsolate(), cb);
     }
     void stop();
-    void write(WriteData* data);
-    void writeToMainLoop(char* data, uint32_t length);
+    void sendVoiceWav(char* data, uint32_t length);
+    void sendSilentWav();
 private:
 
-    static void sStart(uv_async_t* handle);
+    static void sCreateSession(uv_async_t* handle);
     static void sWrite(uv_async_t* handle);
     static void sFreeHandle(uv_handle_t* handle);
     static void sFreeCallback(char* data, void* hint);
-    void connect();
+    void write(WriteData* data);
+    void createSession();
 
     char* mUserName;
     char* mPasswd;
+    char mSilent[32000]; //0.5 second
     v8::Persistent<v8::Object> mObj;
     v8::Persistent<v8::Function> mFunc;
     v8::Persistent<v8::Function> mCB;
@@ -343,6 +353,14 @@ private:
 WatsonTTS::WatsonTTS(const char* username, const char* passwd, v8::Local<v8::Function> func)
     : mUserName(strdup(username)), mPasswd(strdup(passwd)){
     mFunc.Reset(func->CreationContext()->GetIsolate(), func);
+    SF_INFO sfinfo;
+    SNDFILE* silent = sf_open("./voice/interlude/empty.wav", SFM_READ, &sfinfo);
+    if (!silent) {
+        printf("can't open silent wav: %s\n", sf_strerror(NULL));
+        return;
+    }
+    sf_readf_short(silent, (short*) mSilent, 16000);
+    sf_close(silent);
 }
 
 WatsonTTS::~WatsonTTS() {
@@ -354,7 +372,7 @@ WatsonTTS::~WatsonTTS() {
 }
 
 void
-WatsonTTS::connect() {
+WatsonTTS::createSession() {
     v8::Isolate* isolate = v8::Isolate::GetCurrent();
     v8::HandleScope scope(isolate);
     v8::Local<v8::Context> ctx = isolate->GetCurrentContext();
@@ -377,9 +395,9 @@ void WatsonTTS::sFreeHandle(uv_handle_t* handle) {
 }
 
 /*static*/
-void WatsonTTS::sStart(uv_async_t* handle) {
+void WatsonTTS::sCreateSession(uv_async_t* handle) {
     WatsonTTS* _this = (WatsonTTS*)handle->data;
-    _this->connect();
+    _this->createSession();
     uv_close(reinterpret_cast<uv_handle_t*>(handle), sFreeHandle);
 }
 
@@ -395,7 +413,7 @@ WatsonTTS::WSConnect() {
     uv_async_t* async = new uv_async_t;
     async->data = this;
     uv_async_init(uv_default_loop(), async,
-            sStart);
+            sCreateSession);
     uv_async_send(async);
 }
 
@@ -421,9 +439,20 @@ void WatsonTTS::sFreeCallback(char* data, void* hint) {
 }
 
 void
-WatsonTTS::writeToMainLoop(char* data, uint32_t length) {
+WatsonTTS::sendVoiceWav(char* data, uint32_t length) {
+    if ( length > 0 ) {
+        uv_async_t* async = new uv_async_t;
+        async->data = new WriteData(data, length, this);
+        uv_async_init(uv_default_loop(), async,
+                sWrite);
+        uv_async_send(async);
+    }
+}
+
+void
+WatsonTTS::sendSilentWav() {
     uv_async_t* async = new uv_async_t;
-    async->data = new WriteData(data, length, this);
+    async->data = new WriteData(mSilent, 16000, this);
     uv_async_init(uv_default_loop(), async,
             sWrite);
     uv_async_send(async);
@@ -804,7 +833,7 @@ void HumixSpeech::sLoop(void* arg) {
                     printf("Listening the command...\n");
                     _this->mState = kCommand;
                     if ( _this->mWatsonTTS ) {
-                        _this->mWatsonTTS->writeToMainLoop((char*) adbuf, (uint32_t) (k * 2));
+                        _this->mWatsonTTS->sendVoiceWav((char*) adbuf, (uint32_t) (k * 2));
                     } else {
                         wavWriter = new WavWriter("/dev/shm/test.wav", 1, samprate);
                         wavWriter->writeHeader();
@@ -831,13 +860,14 @@ void HumixSpeech::sLoop(void* arg) {
                 if (in_speech) {
                     //keep receiving command
                     if ( _this->mWatsonTTS ) {
-                        _this->mWatsonTTS->writeToMainLoop((char*) adbuf, (uint32_t) (k * 2));
+                        _this->mWatsonTTS->sendVoiceWav((char*) adbuf, (uint32_t) (k * 2));
                     } else {
                         wavWriter->writeData((char*) adbuf, (size_t) (k * 2));
                     }
                 } else {
                     if ( _this->mWatsonTTS ) {
-                        _this->mWatsonTTS->writeToMainLoop((char*) adbuf, (uint32_t) (k * 2));
+                        _this->mWatsonTTS->sendVoiceWav((char*) adbuf, (uint32_t) (k * 2));
+                        _this->mWatsonTTS->sendSilentWav();
                     } else {
                         wavWriter->writeData((char*) adbuf, (size_t) (k * 2));
                         delete wavWriter;
