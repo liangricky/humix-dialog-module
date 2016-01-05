@@ -22,7 +22,7 @@
 
 #include <nan.h>
 
-class WatsonTTS;
+class StreamTTS;
 
 class HumixSpeech : public Nan::ObjectWrap{
 public:
@@ -44,7 +44,7 @@ private:
     static void sStart(const v8::FunctionCallbackInfo<v8::Value>& info);
     static void sPlay(const v8::FunctionCallbackInfo<v8::Value>& info);
     static void sStop(const v8::FunctionCallbackInfo<v8::Value>& info);
-    static void sEnableWatson(const v8::FunctionCallbackInfo<v8::Value>& info);
+    static void sSetupEngine(const v8::FunctionCallbackInfo<v8::Value>& info);
 
     void Start(const v8::FunctionCallbackInfo<v8::Value>& info);
     void Stop(const v8::FunctionCallbackInfo<v8::Value>& info);
@@ -73,7 +73,7 @@ private:
     v8::Persistent<v8::Function> mCB;
     std::queue<std::string> mAplayFiles;
     std::queue<std::string> mCommands;
-    WatsonTTS* mWatsonTTS;
+    StreamTTS* mStreamTTS;
 };
 
 

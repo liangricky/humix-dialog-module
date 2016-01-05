@@ -4,7 +4,7 @@
       "target_name": "HumixSpeech",
       "sources": [
         "./src/wavutil.cpp",
-        "./src/watsontts.cpp",
+        "./src/StreamTTS.cpp",
         "./src/HumixSpeech.cpp"
       ],
       "include_dirs": [ "<!(node -e \"require('nan')\")",

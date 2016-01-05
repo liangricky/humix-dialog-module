@@ -13,12 +13,13 @@
 * See the License for the specific language governing permissions and
 * limitations under the License.
 *******************************************************************************/
-#include "watsontts.hpp"
-
 #include <sndfile.h>
+#include "StreamTTS.hpp"
 
-WatsonTTS::WatsonTTS(const char* username, const char* passwd, v8::Local<v8::Function> func)
-    : mUserName(strdup(username)), mPasswd(strdup(passwd)){
+StreamTTS::StreamTTS(const char* username, const char* passwd, Engine engine, v8::Local<v8::Function> func)
+        : mUserName(strdup(username)), mPasswd(strdup(passwd)),
+          mEngine(engine) {
+
     mFunc.Reset(func->CreationContext()->GetIsolate(), func);
     SF_INFO sfinfo;
     SNDFILE* silent = sf_open("./voice/interlude/empty.wav", SFM_READ, &sfinfo);
@@ -27,16 +28,18 @@ WatsonTTS::WatsonTTS(const char* username, const char* passwd, v8::Local<v8::Fun
         return;
     }
     sf_count_t count = sf_readf_short(silent, (short*) mSilent, ONE_SEC_FRAMES) * 2;
-    char p = '0';
-    for (sf_count_t i = 0; i < count ; i+=2) {
-        p = mSilent[i];
-        mSilent[i] = mSilent[i+1];
-        mSilent[i+1] = p;
+    if ( engine == kWatson ) {
+        char p = '0';
+        for (sf_count_t i = 0; i < count ; i+=2) {
+            p = mSilent[i];
+            mSilent[i] = mSilent[i+1];
+            mSilent[i+1] = p;
+        }
     }
     sf_close(silent);
 }
 
-WatsonTTS::~WatsonTTS() {
+StreamTTS::~StreamTTS() {
     free(mUserName);
     free(mPasswd);
     mObj.Reset();
@@ -46,16 +49,16 @@ WatsonTTS::~WatsonTTS() {
 
 /*static*/
 void
-WatsonTTS::sListening(const v8::FunctionCallbackInfo<v8::Value>& info) {
+StreamTTS::sListening(const v8::FunctionCallbackInfo<v8::Value>& info) {
     v8::Local<v8::Context> ctx = info.GetIsolate()->GetCurrentContext();
     v8::Local<v8::Object> data = info.Data()->ToObject(ctx).ToLocalChecked();
     assert(data->InternalFieldCount() > 0);
-    WatsonTTS* _this = reinterpret_cast<WatsonTTS*>(data->GetAlignedPointerFromInternalField(0));
+    StreamTTS* _this = reinterpret_cast<StreamTTS*>(data->GetAlignedPointerFromInternalField(0));
     _this->mConn.Reset(info.GetIsolate(), info[0]->ToObject(ctx).ToLocalChecked());
 }
 
 v8::Local<v8::Function>
-WatsonTTS::GetListeningFunction(v8::Isolate* isolate) {
+StreamTTS::GetListeningFunction(v8::Isolate* isolate) {
     v8::EscapableHandleScope scope(isolate);
     v8::Local<v8::Context> ctx = isolate->GetCurrentContext();
     v8::Local<v8::ObjectTemplate> otmpl = v8::ObjectTemplate::New(isolate);
@@ -66,7 +69,7 @@ WatsonTTS::GetListeningFunction(v8::Isolate* isolate) {
 }
 
 void
-WatsonTTS::CreateSession() {
+StreamTTS::CreateSession() {
     v8::Isolate* isolate = v8::Isolate::GetCurrent();
     v8::HandleScope scope(isolate);
     v8::Local<v8::Context> ctx = isolate->GetCurrentContext();
@@ -79,32 +82,35 @@ WatsonTTS::CreateSession() {
     if ( func->Call(ctx, ctx->Global(),3, args).ToLocal(&rev) ) {
         v8::Local<v8::Object> session = rev->ToObject(ctx).ToLocalChecked();
         mObj.Reset(isolate, session);
-        v8::Local<v8::Value> cb[] = { Nan::New("connect").ToLocalChecked(), GetListeningFunction(isolate) };
-        Nan::MakeCallback(session, "on", 2, cb);
+        if ( mEngine == kWatson ) {
+            //watson need the connection object to perform the close();
+            v8::Local<v8::Value> cb[] = { Nan::New("connect").ToLocalChecked(), GetListeningFunction(isolate) };
+            Nan::MakeCallback(session, "on", 2, cb);
+        }
     }
 }
 
 /*static*/
-void WatsonTTS::sFreeHandle(uv_handle_t* handle) {
+void StreamTTS::sFreeHandle(uv_handle_t* handle) {
     delete handle;
 }
 
 /*static*/
-void WatsonTTS::sCreateSession(uv_async_t* handle) {
-    WatsonTTS* _this = (WatsonTTS*)handle->data;
+void StreamTTS::sCreateSession(uv_async_t* handle) {
+    StreamTTS* _this = (StreamTTS*)handle->data;
     _this->CreateSession();
     uv_close(reinterpret_cast<uv_handle_t*>(handle), sFreeHandle);
 }
 
 /*static*/
-void WatsonTTS::sWrite(uv_async_t* handle) {
+void StreamTTS::sWrite(uv_async_t* handle) {
     WriteData* wd = (WriteData*)handle->data;
     wd->mThis->Write(wd);
     uv_close(reinterpret_cast<uv_handle_t*>(handle), sFreeHandle);
 }
 
 void
-WatsonTTS::WSConnect() {
+StreamTTS::WSConnect() {
     uv_async_t* async = new uv_async_t;
     async->data = this;
     uv_async_init(uv_default_loop(), async,
@@ -113,7 +119,7 @@ WatsonTTS::WSConnect() {
 }
 
 void
-WatsonTTS::Stop() {
+StreamTTS::Stop() {
     uv_async_t* async = new uv_async_t;
     async->data = this;
     uv_async_init(uv_default_loop(), async,
@@ -122,26 +128,31 @@ WatsonTTS::Stop() {
 }
 
 /*static*/
-void WatsonTTS::sCloseSession(uv_async_t* handle) {
-    WatsonTTS* _this = (WatsonTTS*)handle->data;
+void StreamTTS::sCloseSession(uv_async_t* handle) {
+    StreamTTS* _this = (StreamTTS*)handle->data;
     _this->CloseSession();
     uv_close(reinterpret_cast<uv_handle_t*>(handle), sFreeHandle);
 }
 
 void
-WatsonTTS::CloseSession() {
+StreamTTS::CloseSession() {
     v8::Isolate* isolate = v8::Isolate::GetCurrent();
     v8::HandleScope scope(isolate);
-    if ( mConn.IsEmpty() ) {
-        return;
+    if ( mEngine == kWatson ) {
+        if ( mConn.IsEmpty() ) {
+            return;
+        }
+        v8::Local<v8::Object> conn = v8::Local<v8::Object>::New(isolate, mConn);
+        Nan::MakeCallback(conn, "close", 0, NULL);
+    } else if ( mEngine == kGoogle ) {
+        v8::Local<v8::Object> req = v8::Local<v8::Object>::New(isolate, mObj);
+        Nan::MakeCallback(req, "end", 0, NULL);
     }
-    v8::Local<v8::Object> conn = v8::Local<v8::Object>::New(isolate, mConn);
-    Nan::MakeCallback(conn, "close", 0, NULL);
     mObj.Reset();
 }
 
 void
-WatsonTTS::Write(WriteData* data) {
+StreamTTS::Write(WriteData* data) {
     v8::Isolate* isolate = v8::Isolate::GetCurrent();
     v8::HandleScope scope(isolate);
     if ( mObj.IsEmpty() ) {
@@ -156,16 +167,16 @@ WatsonTTS::Write(WriteData* data) {
 }
 
 /*static*/
-void WatsonTTS::sFreeCallback(char* data, void* hint) {
+void StreamTTS::sFreeCallback(char* data, void* hint) {
     WriteData* wd = (WriteData*)hint;
     delete wd;
 }
 
 void
-WatsonTTS::SendVoiceWav(char* data, uint32_t length) {
+StreamTTS::SendVoiceWav(char* data, uint32_t length) {
     if ( length > 0 ) {
         uv_async_t* async = new uv_async_t;
-        async->data = new WriteData(data, length, this, true);
+        async->data = new WriteData(data, length, this, true, mEngine == kWatson);
         uv_async_init(uv_default_loop(), async,
                 sWrite);
         uv_async_send(async);
@@ -173,10 +184,15 @@ WatsonTTS::SendVoiceWav(char* data, uint32_t length) {
 }
 
 void
-WatsonTTS::SendSilentWav() {
+StreamTTS::SendSilentWav() {
     uv_async_t* async = new uv_async_t;
     async->data = new WriteData(mSilent, ONE_SEC_FRAMES*2, this, false);
     uv_async_init(uv_default_loop(), async,
             sWrite);
     uv_async_send(async);
+}
+
+void
+StreamTTS::SendIdleSilent() {
+    SendSilentWav();
 }

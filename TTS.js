@@ -30,6 +30,9 @@ var HumixSpeech = require('./lib/HumixSpeech').HumixSpeech;
 
 var voice_path = path.join(__dirname, 'voice');
 var url = 'http://tts.itri.org.tw/TTSService/Soap_1_3.php?wsdl';
+var kGoogle = 0,
+    kWatson = 1;
+var engineIndex = {'google': kGoogle, 'watson': kWatson };
 
 function convertText(text, hash, callback) {
     var args = {
@@ -127,7 +130,7 @@ var commandRE = /---="(.*)"=---/;
  */
 function receiveCommand(cmdstr) {
     cmdstr = cmdstr.trim();
-    if ( config.enableWatson ) {
+    if ( config.engine ) {
         console.error('command found:', cmdstr);
     } else {
         var match = commandRE.exec(cmdstr);
@@ -150,10 +153,9 @@ function receiveCommand(cmdstr) {
 
 try {
     hs = new HumixSpeech(config.options);
-    if ( config.enableWatson ) {
-        console.error('enable watson');
-        hs.enableWatson( config.watson.username, config.watson.passwd, require('./lib/watson').startSession);
-    }
+    var engine = config.engine || 'google';
+    hs.engine( config[engine].username, config[engine].passwd,
+    		engineIndex[engine], require('./lib/' + engine).startSession);
     hs.start(receiveCommand);
 } catch ( error ) {
     console.error(error);

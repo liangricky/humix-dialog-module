@@ -14,27 +14,31 @@
 * limitations under the License.
 *******************************************************************************/
 
-#ifndef SRC_WATSONTTS_HPP_
-#define SRC_WATSONTTS_HPP_
+#ifndef SRC_STREAMTTS_HPP_
+#define SRC_STREAMTTS_HPP_
 
 #include <nan.h>
 
 #define ONE_SEC_FRAMES 16000
 
 /**
- * This is a Wrapper class for the Watson JS function.
- * It use the JS function to create Watson TTS session and write
- * wav file to the web socket.
+ * This is a Wrapper class for the JS function.
+ * It use the JS function to create TTS session and write
+ * wav file to the websocket/http.
  */
-class WatsonTTS {
+class StreamTTS {
 public:
+    enum Engine {
+        kGoogle = 0,
+        kWatson = 1
+    };
     /**
      * create a Watson TTS wrapper with the username and passwd.
      * the most important part is the Watson JS function
      */
-    WatsonTTS(const char* username, const char* passwd, v8::Local<v8::Function> func);
+    StreamTTS(const char* username, const char* passwd, Engine engine, v8::Local<v8::Function> func);
 
-    ~WatsonTTS();
+    ~StreamTTS();
 
     /**
      * It's a data structure to store the wav raw data in network byte order (BE)
@@ -45,15 +49,17 @@ public:
          * store S16_BE data to be sent over network, it will do
          * LE to BE converting if the alloc=true
          */
-        WriteData(const char* data, uint32_t size, WatsonTTS* tts, bool alloc)
+        WriteData(const char* data, uint32_t size, StreamTTS* tts, bool alloc, bool be = true)
                 : mAlloced(alloc){
             if ( alloc ) {
                 mData = (char*)malloc(size);
                 memcpy(mData, data, size);
-                for ( uint32_t i = 0; i < size ; i+=2) {
-                    char t = mData[i];
-                    mData[i] = mData[i+1];
-                    mData[i+1] = t;
+                if ( be ) {
+                    for ( uint32_t i = 0; i < size ; i+=2) {
+                        char t = mData[i];
+                        mData[i] = mData[i+1];
+                        mData[i+1] = t;
+                    }
                 }
             } else {
                 mData = const_cast<char*>(data);
@@ -68,7 +74,7 @@ public:
         }
         char* mData;
         uint32_t mSize;
-        WatsonTTS* mThis;
+        StreamTTS* mThis;
         bool mAlloced;
     };
 
@@ -101,6 +107,8 @@ public:
      * it will send any aynnc and call the ws.write() in main loop
      */
     void SendSilentWav();
+
+    void SendIdleSilent();
 private:
 
     /**
@@ -160,6 +168,7 @@ private:
     v8::Persistent<v8::Function> mFunc;
     v8::Persistent<v8::Function> mCB;
     v8::Persistent<v8::Object> mConn;
+    Engine mEngine;
 };
 
-#endif /* SRC_WATSONTTS_HPP_ */
+#endif /* SRC_STREAMTTS_HPP_ */

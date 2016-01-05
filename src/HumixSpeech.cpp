@@ -24,7 +24,8 @@
 #include <pocketsphinx.h>
 
 #include "HumixSpeech.hpp"
-#include "watsontts.hpp"
+
+#include "StreamTTS.hpp"
 #include "wavutil.hpp"
 
 /* Sleep for specified msec */
@@ -148,7 +149,7 @@ HumixSpeech::HumixSpeech(const v8::FunctionCallbackInfo<v8::Value>& args)
     }
     uv_mutex_init(&mAplayMutex);
     uv_mutex_init(&mCommandMutex);
-    mWatsonTTS = NULL;
+    mStreamTTS = NULL;
     Wrap(args.This());
 }
 
@@ -180,8 +181,8 @@ HumixSpeech::~HumixSpeech() {
     }
     uv_mutex_destroy(&mAplayMutex);
     uv_mutex_destroy(&mCommandMutex);
-    if ( mWatsonTTS ) {
-        delete mWatsonTTS;
+    if ( mStreamTTS ) {
+        delete mStreamTTS;
     }
     mCB.Reset();
 }
@@ -227,8 +228,8 @@ void HumixSpeech::sStart(const v8::FunctionCallbackInfo<v8::Value>& info) {
 void
 HumixSpeech::Start(const v8::FunctionCallbackInfo<v8::Value>& info) {
     v8::Local<v8::Function> cb = info[0].As<v8::Function>();
-    if ( mWatsonTTS ) {
-        mWatsonTTS->SetCB(cb);
+    if ( mStreamTTS ) {
+        mStreamTTS->SetCB(cb);
     }
     mCB.Reset(info.GetIsolate(), cb);
     uv_thread_create(&mThread, sLoop, this);
@@ -284,7 +285,7 @@ HumixSpeech::Play(const v8::FunctionCallbackInfo<v8::Value>& info) {
 }
 
 /*static*/
-void HumixSpeech::sEnableWatson(const v8::FunctionCallbackInfo<v8::Value>& info) {
+void HumixSpeech::sSetupEngine(const v8::FunctionCallbackInfo<v8::Value>& info) {
     HumixSpeech* hs = Unwrap<HumixSpeech>(info.Holder());
     if ( hs == nullptr ) {
         info.GetIsolate()->ThrowException(v8::Exception::ReferenceError(
@@ -292,16 +293,19 @@ void HumixSpeech::sEnableWatson(const v8::FunctionCallbackInfo<v8::Value>& info)
         return;
     }
 
-    if ( info.Length() != 3 || !info[0]->IsString() ||
-            !info[1]->IsString() || !info[2]->IsFunction()) {
+    if ( info.Length() != 4 || !info[0]->IsString() ||
+            !info[1]->IsString() || !info[2]->IsNumber() ||
+            !info[3]->IsFunction()) {
         info.GetIsolate()->ThrowException(v8::Exception::SyntaxError(
                 Nan::New("Usage: enableWatson(username, passwd, function)").ToLocalChecked()));
         return;
     }
-
+    v8::Local<v8::Context> ctx = info.GetIsolate()->GetCurrentContext();
     v8::String::Utf8Value username(info[0]);
     v8::String::Utf8Value passwd(info[1]);
-    hs->mWatsonTTS = new WatsonTTS(*username, *passwd, info[2].As<v8::Function>());
+    v8::Local<v8::Number> engine = info[2]->ToNumber(ctx).ToLocalChecked();
+    hs->mStreamTTS = new StreamTTS(*username, *passwd, (StreamTTS::Engine)(engine->Int32Value()),
+            info[3].As<v8::Function>());
 }
 
 /*static*/
@@ -375,8 +379,8 @@ void HumixSpeech::sLoop(void* arg) {
                     hyp = ps_get_hyp(ps, NULL);
                     if (hyp != NULL && strcmp("HUMIX", hyp) == 0) {
                         _this->mState = kWaitCommand;
-                        if (_this->mWatsonTTS ) {
-                            _this->mWatsonTTS->WSConnect();
+                        if (_this->mStreamTTS ) {
+                            _this->mStreamTTS->WSConnect();
                         }
                         printf("keyword HUMIX found\n");
                         fflush(stdout);
@@ -400,8 +404,8 @@ void HumixSpeech::sLoop(void* arg) {
                 if (in_speech) {
                     printf("Listening the command...\n");
                     _this->mState = kCommand;
-                    if ( _this->mWatsonTTS ) {
-                        _this->mWatsonTTS->SendVoiceWav((char*) adbuf, (uint32_t) (k * 2));
+                    if ( _this->mStreamTTS ) {
+                        _this->mStreamTTS->SendVoiceWav((char*) adbuf, (uint32_t) (k * 2));
                     } else {
                         wavWriter = new WavWriter("/dev/shm/test.wav", 1, samprate);
                         wavWriter->WriteHeader();
@@ -411,15 +415,15 @@ void HumixSpeech::sLoop(void* arg) {
                     //increase waiting count;
                     if (++waitCount > 100) {
                         waitCount = 0;
-                        if ( _this->mWatsonTTS ) {
+                        if ( _this->mStreamTTS ) {
                             //keep connection
-                            _this->mWatsonTTS->SendSilentWav();
+                            _this->mStreamTTS->SendIdleSilent();
                         }
                         if (++humixCount > 20) {
                             //exit humix-loop
                             _this->mState = kReady;
-                            if (_this->mWatsonTTS ) {
-                                _this->mWatsonTTS->Stop();
+                            if (_this->mStreamTTS ) {
+                                _this->mStreamTTS->Stop();
                             }
                             printf("READY....\n");
                         } else {
@@ -434,15 +438,15 @@ void HumixSpeech::sLoop(void* arg) {
             case kCommand:
                 if (in_speech) {
                     //keep receiving command
-                    if ( _this->mWatsonTTS ) {
-                        _this->mWatsonTTS->SendVoiceWav((char*) adbuf, (uint32_t) (k * 2));
+                    if ( _this->mStreamTTS ) {
+                        _this->mStreamTTS->SendVoiceWav((char*) adbuf, (uint32_t) (k * 2));
                     } else {
                         wavWriter->WriteData((char*) adbuf, (size_t) (k * 2));
                     }
                 } else {
-                    if ( _this->mWatsonTTS ) {
-                        _this->mWatsonTTS->SendVoiceWav((char*) adbuf, (uint32_t) (k * 2));
-                        _this->mWatsonTTS->SendSilentWav();
+                    if ( _this->mStreamTTS ) {
+                        _this->mStreamTTS->SendVoiceWav((char*) adbuf, (uint32_t) (k * 2));
+                        _this->mStreamTTS->SendSilentWav();
                     } else {
                         wavWriter->WriteData((char*) adbuf, (size_t) (k * 2));
                         delete wavWriter;
@@ -457,7 +461,7 @@ void HumixSpeech::sLoop(void* arg) {
                         WavPlayer player(_this->mWavProc);
                         player.Play();
                     }
-                    if ( !_this->mWatsonTTS ) {
+                    if ( !_this->mStreamTTS ) {
                         int result = _this->ProcessCommand(msg, 1024);
                         if (result == 0) {
                             uv_async_t* async = new uv_async_t;
@@ -529,7 +533,7 @@ v8::Local<v8::FunctionTemplate> HumixSpeech::sFunctionTemplate(
     NODE_SET_PROTOTYPE_METHOD(tmpl, "start", sStart);
     NODE_SET_PROTOTYPE_METHOD(tmpl, "stop", sStop);
     NODE_SET_PROTOTYPE_METHOD(tmpl, "play", sPlay);
-    NODE_SET_PROTOTYPE_METHOD(tmpl, "enableWatson", sEnableWatson);
+    NODE_SET_PROTOTYPE_METHOD(tmpl, "engine", sSetupEngine);
 
     return scope.Escape(tmpl);
 }
