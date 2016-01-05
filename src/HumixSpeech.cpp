@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright (c) 2015 IBM Corp.
+* Copyright (c) 2015,2016 IBM Corp.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -14,35 +14,18 @@
 * limitations under the License.
 *******************************************************************************/
 
-#include <stdio.h>
-#include <string.h>
 #include <assert.h>
-#include <unistd.h>
-#include <sys/types.h>
-#include <signal.h>
 #include <errno.h>
 #include <sys/wait.h>
-#include <poll.h>
-#include <sys/socket.h>
-#include <sys/un.h>
-#include <fcntl.h>
-#include <stdint.h>
-
-#include <fstream>
-#include <queue>
-#include <string>
-
-#include <nan.h>
 #include <sys/select.h>
-#include <sndfile.h>
-#include <alsa/asoundlib.h>
+
 #include <sphinxbase/err.h>
 #include <sphinxbase/ad.h>
 #include <pocketsphinx.h>
 
-static char RIF_MARKER[5] = "RIFF";
-static char WAVE[5] = "WAVE";
-static char FMT[5] = "fmt ";
+#include "HumixSpeech.hpp"
+#include "watsontts.hpp"
+#include "wavutil.hpp"
 
 /* Sleep for specified msec */
 static void sleep_msec(int32 ms) {
@@ -54,210 +37,6 @@ static void sleep_msec(int32 ms) {
 
     select(0, NULL, NULL, NULL, &tmo);
 }
-
-/**
- *
- * Use this class to write wav file
- * fixed format: S16, because sphinx uses it
- */
-class WavWriter {
-public:
-    WavWriter(const char* filename, uint16_t channel, uint32_t sample) {
-        mRIFFMarker = RIF_MARKER;
-        mFiletypeHeader = WAVE;
-        mFormatMarker = FMT;
-        mDataHeaderLength = 16;
-        mFileSize = 36;
-        mFormatType = 1;
-        mNumberOfChannels = channel;
-        mSampleRate = sample;
-        mBytesPerSecond = sample * channel * 16 / 8;//(Sample Rate * Bit Size * Channels) / 8
-        mBytesPerFrame = channel * 16 / 8;
-        mBitsPerSample = 16;
-        mFilename = strdup(filename);
-        ofs.open(mFilename, std::ofstream::out | std::ofstream::trunc);
-    }
-
-    ~WavWriter() {
-        if (mFileSize > 36) {
-            //modify the fie size field
-            ofs.seekp(4);
-            ofs.write((char*) &mFileSize, 4);
-
-            ofs.seekp(40);
-            uint32_t data_size = mFileSize - 36;
-            ofs.write((char*) &data_size, 4);
-        }
-        ofs.close();
-        free(mFilename);
-    }
-
-    void writeHeader();
-    void writeData(const char *data, size_t size);
-
-private:
-    char* mFilename;
-    char* mRIFFMarker;
-    uint32_t mFileSize;
-    char* mFiletypeHeader;
-    char* mFormatMarker;
-    uint32_t mDataHeaderLength;
-    uint16_t mFormatType;
-    uint16_t mNumberOfChannels;
-    uint32_t mSampleRate;
-    uint32_t mBytesPerSecond;
-    uint16_t mBytesPerFrame;
-    uint16_t mBitsPerSample;
-    std::ofstream ofs;
-};
-
-void WavWriter::writeHeader() {
-    ofs.write(mRIFFMarker, 4);
-    ofs.write((char*) &mFileSize, 4);
-    ofs.write(mFiletypeHeader, 4);
-    ofs.write(mFormatMarker, 4);
-    ofs.write((char*) &mDataHeaderLength, 4);
-    ofs.write((char*) &mFormatType, 2);
-    ofs.write((char*) &mNumberOfChannels, 2);
-    ofs.write((char*) &mSampleRate, 4);
-    ofs.write((char*) &mBytesPerSecond, 4);
-    ofs.write((char*) &mBytesPerFrame, 2);
-    ofs.write((char*) &mBitsPerSample, 2);
-    ofs.write("data", 4);
-
-    uint32_t data_size = mFileSize - 36;
-    ofs.write((char*) &data_size, 4);
-}
-
-void WavWriter::writeData(const char* data, size_t size) {
-    ofs.write(data, size);
-    mFileSize += size;
-}
-
-class WavPlayer {
-public:
-    WavPlayer(const char *filename) {
-        int pcm = 0;
-        int dir = 0;
-        snd_pcm_hw_params_t *params;
-        mHandle = NULL;
-        mBuff = NULL;
-        mError = false;
-        mSize = 0;
-        mFile = NULL;
-
-        SF_INFO sfinfo;
-        mFile = sf_open(filename, SFM_READ, &sfinfo);
-        if (!mFile) {
-            printf("ERROR: %s\n", sf_strerror(NULL));
-            mError = true;
-            return;
-        }
-
-        /* Open the PCM device in playback mode */
-        if ((pcm = snd_pcm_open(&mHandle, "default", SND_PCM_STREAM_PLAYBACK, 0))
-                < 0) {
-            printf("ERROR: %s\n", snd_strerror(pcm));
-            mError = true;
-            return;
-        }
-        /* Allocate the snd_pcm_hw_params_t structure on the stack. */
-        snd_pcm_hw_params_alloca(&params);
-        /* Init hwparams with full configuration space */
-        if (snd_pcm_hw_params_any(mHandle, params) < 0) {
-            printf("Can not configure this PCM device.\n");
-            mError = true;
-            return;
-        }
-        if (snd_pcm_hw_params_set_access(mHandle, params,
-                SND_PCM_ACCESS_RW_INTERLEAVED) < 0) {
-            printf("Error setting access.\n");
-            mError = true;
-            return;
-        }
-
-        /* Set sample format: always S16_LE */
-        if (snd_pcm_hw_params_set_format(mHandle, params, SND_PCM_FORMAT_S16_LE)
-                < 0) {
-            printf("Error setting format.\n");
-            return;
-        }
-
-        /* Set sample rate */
-        uint32_t exact_rate = sfinfo.samplerate;
-        if (snd_pcm_hw_params_set_rate_near(mHandle, params, &exact_rate, &dir)
-                < 0) {
-            printf("Error setting rate.\n");
-            mError = true;
-            return;
-        }
-        /* Set number of channels */
-        if (snd_pcm_hw_params_set_channels(mHandle, params, sfinfo.channels)
-                < 0) {
-            printf("Error setting channels.\n");
-            mError = true;
-            return;
-        }
-        /* Write the parameters to the driver */
-        if ((pcm = snd_pcm_hw_params(mHandle, params)) < 0) {
-            printf("unable to set hw parameters: %s\n", snd_strerror(pcm));
-            mError = true;
-            return;
-        }
-
-        /* Use a buffer large enough to hold one period */
-        if (snd_pcm_hw_params_get_period_size(params, &mFrames, NULL) < 0) {
-            printf("Error get buffer size.\n");
-            mError = true;
-            return;
-        }
-        snd_pcm_nonblock(mHandle, 0);
-//        printf("frames:%lu\n", mFrames);
-
-        mSize = mFrames * sfinfo.channels * 2; /* 2 -> sample size */
-        ;
-        mBuff = (char *) malloc(mSize);
-    }
-
-    ~WavPlayer() {
-        if (!mError) {
-            if (mHandle) {
-                snd_pcm_drain(mHandle);
-                snd_pcm_close(mHandle);
-            }
-            if (mBuff) {
-                free(mBuff);
-            }
-        }
-    }
-
-    void play() {
-        if (mFile) {
-            int pcmrc = 0;
-            int readcount = 0;
-            while ((readcount = sf_readf_short(mFile, (short*) mBuff, mFrames))
-                    > 0) {
-                pcmrc = snd_pcm_writei(mHandle, mBuff, readcount);
-                if (pcmrc == -EPIPE) {
-                    printf("Underrun!\n");
-                    snd_pcm_recover(mHandle, pcmrc, 1);
-                } else if (pcmrc != readcount) {
-                    printf("wframe count mismatched: %d, %d\n", pcmrc,
-                            readcount);
-                }
-            }
-            sf_close(mFile);
-            mFile = NULL;
-        }
-    }
-private:
-    snd_pcm_t *mHandle;
-    SNDFILE *mFile;
-    char* mBuff;
-    size_t mSize;
-    bool mError;
-    snd_pcm_uframes_t mFrames;
-};
 
 static const arg_t cont_args_def[] = {
     POCKETSPHINX_OPTIONS,
@@ -298,217 +77,6 @@ static const arg_t cont_args_def[] = {
     CMDLN_EMPTY_OPTION
 };
 
-class WatsonTTS {
-public:
-    WatsonTTS(const char* username, const char* passwd, v8::Local<v8::Function> func);
-    ~WatsonTTS();
-
-    class WriteData {
-    public:
-        WriteData(const char* data, uint32_t size, WatsonTTS* tts) {
-            mData = (char*)malloc(size);
-            memcpy(mData, data, size);
-            for ( uint32_t i = 0; i < size ; i+=2) {
-                char t = mData[i];
-                mData[i] = mData[i+1];
-                mData[i+1] = t;
-            }
-            mSize = size;
-            mThis = tts;
-        }
-        ~WriteData() {
-            free (mData);
-        }
-        char* mData;
-        uint32_t mSize;
-        WatsonTTS* mThis;
-    };
-    /**
-     * create ws connection
-     */
-    void WSConnect();
-    void setCB(v8::Local<v8::Function> cb) {
-        mCB.Reset(cb->CreationContext()->GetIsolate(), cb);
-    }
-    void stop();
-    void sendVoiceWav(char* data, uint32_t length);
-    void sendSilentWav();
-private:
-
-    static void sCreateSession(uv_async_t* handle);
-    static void sWrite(uv_async_t* handle);
-    static void sFreeHandle(uv_handle_t* handle);
-    static void sFreeCallback(char* data, void* hint);
-    void write(WriteData* data);
-    void createSession();
-
-    char* mUserName;
-    char* mPasswd;
-    char mSilent[32000]; //0.5 second
-    v8::Persistent<v8::Object> mObj;
-    v8::Persistent<v8::Function> mFunc;
-    v8::Persistent<v8::Function> mCB;
-};
-
-WatsonTTS::WatsonTTS(const char* username, const char* passwd, v8::Local<v8::Function> func)
-    : mUserName(strdup(username)), mPasswd(strdup(passwd)){
-    mFunc.Reset(func->CreationContext()->GetIsolate(), func);
-    SF_INFO sfinfo;
-    SNDFILE* silent = sf_open("./voice/interlude/empty.wav", SFM_READ, &sfinfo);
-    if (!silent) {
-        printf("can't open silent wav: %s\n", sf_strerror(NULL));
-        return;
-    }
-    sf_readf_short(silent, (short*) mSilent, 16000);
-    sf_close(silent);
-}
-
-WatsonTTS::~WatsonTTS() {
-    free(mUserName);
-    free(mPasswd);
-    mObj.Reset();
-    mFunc.Reset();
-    mCB.Reset();
-}
-
-void
-WatsonTTS::createSession() {
-    v8::Isolate* isolate = v8::Isolate::GetCurrent();
-    v8::HandleScope scope(isolate);
-    v8::Local<v8::Context> ctx = isolate->GetCurrentContext();
-    v8::Local<v8::Function> func = v8::Local<v8::Function>::New(isolate, mFunc);
-    v8::Local<v8::Function> cb = v8::Local<v8::Function>::New(isolate, mCB);
-    v8::Local<v8::String> username = v8::String::NewFromUtf8(isolate, mUserName);
-    v8::Local<v8::String> passwd = v8::String::NewFromUtf8(isolate, mPasswd);
-    v8::Local<v8::Value> args[] = { username, passwd, cb };
-    v8::Local<v8::Value> rev;
-    if ( func->Call(ctx, ctx->Global(),3, args).ToLocal(&rev) ) {
-        mObj.Reset(isolate, rev->ToObject(ctx).ToLocalChecked());
-    }
-    //TODO register 'connect' event to get connection object
-    //then use it when calling the stop()
-}
-
-/*static*/
-void WatsonTTS::sFreeHandle(uv_handle_t* handle) {
-    delete handle;
-}
-
-/*static*/
-void WatsonTTS::sCreateSession(uv_async_t* handle) {
-    WatsonTTS* _this = (WatsonTTS*)handle->data;
-    _this->createSession();
-    uv_close(reinterpret_cast<uv_handle_t*>(handle), sFreeHandle);
-}
-
-/*static*/
-void WatsonTTS::sWrite(uv_async_t* handle) {
-    WriteData* wd = (WriteData*)handle->data;
-    wd->mThis->write(wd);
-    uv_close(reinterpret_cast<uv_handle_t*>(handle), sFreeHandle);
-}
-
-void
-WatsonTTS::WSConnect() {
-    uv_async_t* async = new uv_async_t;
-    async->data = this;
-    uv_async_init(uv_default_loop(), async,
-            sCreateSession);
-    uv_async_send(async);
-}
-
-void
-WatsonTTS::write(WriteData* data) {
-    v8::Isolate* isolate = v8::Isolate::GetCurrent();
-    v8::HandleScope scope(isolate);
-    if ( mObj.IsEmpty() ) {
-        return;
-    }
-    v8::Local<v8::Object> obj = v8::Local<v8::Object>::New(isolate, mObj);
-    v8::Local<v8::Object> buff;
-    if ( Nan::NewBuffer(data->mData, data->mSize, sFreeCallback, data).ToLocal(&buff) ) {
-        v8::Local<v8::Value> args[] = { buff };
-        Nan::MakeCallback(obj, "write", 1, args);
-    }
-}
-
-/*static*/
-void WatsonTTS::sFreeCallback(char* data, void* hint) {
-    WriteData* wd = (WriteData*)hint;
-    delete wd;
-}
-
-void
-WatsonTTS::sendVoiceWav(char* data, uint32_t length) {
-    if ( length > 0 ) {
-        uv_async_t* async = new uv_async_t;
-        async->data = new WriteData(data, length, this);
-        uv_async_init(uv_default_loop(), async,
-                sWrite);
-        uv_async_send(async);
-    }
-}
-
-void
-WatsonTTS::sendSilentWav() {
-    uv_async_t* async = new uv_async_t;
-    async->data = new WriteData(mSilent, 16000, this);
-    uv_async_init(uv_default_loop(), async,
-            sWrite);
-    uv_async_send(async);
-}
-
-class HumixSpeech : public Nan::ObjectWrap{
-public:
-    HumixSpeech(const v8::FunctionCallbackInfo<v8::Value>& args);
-    ~HumixSpeech();
-
-    typedef enum {
-        kReady,
-        kKeyword,
-        kWaitCommand,
-        kCommand,
-        kStop
-    } State;
-
-    static v8::Local<v8::FunctionTemplate> sFunctionTemplate(
-            v8::Isolate* isolate);
-private:
-    static void sV8New(const v8::FunctionCallbackInfo<v8::Value>& info);
-    static void sStart(const v8::FunctionCallbackInfo<v8::Value>& info);
-    static void sPlay(const v8::FunctionCallbackInfo<v8::Value>& info);
-    static void sStop(const v8::FunctionCallbackInfo<v8::Value>& info);
-    static void sEnableWatson(const v8::FunctionCallbackInfo<v8::Value>& info);
-
-    void start(const v8::FunctionCallbackInfo<v8::Value>& info);
-    void stop(const v8::FunctionCallbackInfo<v8::Value>& info);
-    void play(const v8::FunctionCallbackInfo<v8::Value>& info);
-
-    static void sLoop(void* arg);
-    int processCommand(char* msg, int len);
-
-    static void sReceiveCmd(uv_async_t* handle);
-    static void sFreeHandle(uv_handle_t* handle);
-
-    State mState;
-    ps_decoder_t *mPSDecoder;
-    cmd_ln_t *mConfig;
-    char* mCMDProc;
-    char* mWavSay;
-    char* mWavProc;
-    char* mWavBye;
-    char* mLang;
-    char* mSampleRate;
-    int mArgc;
-    char** mArgv;
-    uv_thread_t mThread;
-    uv_mutex_t mAplayMutex;
-    uv_mutex_t mCommandMutex;
-    v8::Persistent<v8::Function> mCB;
-    std::queue<std::string> mAplayFiles;
-    std::queue<std::string> mCommands;
-    WatsonTTS* mWatsonTTS;
-};
 
 static char* sGetObjectPropertyAsString(
         v8::Local<v8::Context> ctx,
@@ -653,14 +221,14 @@ void HumixSpeech::sStart(const v8::FunctionCallbackInfo<v8::Value>& info) {
                 Nan::New("Usage: start(callback)").ToLocalChecked()));
         return;
     }
-    hs->start(info);
+    hs->Start(info);
 }
 
 void
-HumixSpeech::start(const v8::FunctionCallbackInfo<v8::Value>& info) {
+HumixSpeech::Start(const v8::FunctionCallbackInfo<v8::Value>& info) {
     v8::Local<v8::Function> cb = info[0].As<v8::Function>();
     if ( mWatsonTTS ) {
-        mWatsonTTS->setCB(cb);
+        mWatsonTTS->SetCB(cb);
     }
     mCB.Reset(info.GetIsolate(), cb);
     uv_thread_create(&mThread, sLoop, this);
@@ -680,11 +248,11 @@ void HumixSpeech::sStop(const v8::FunctionCallbackInfo<v8::Value>& info) {
                 Nan::New("Usage: stop()").ToLocalChecked()));
         return;
     }
-    hs->stop(info);
+    hs->Stop(info);
 }
 
 void
-HumixSpeech::stop(const v8::FunctionCallbackInfo<v8::Value>& info) {
+HumixSpeech::Stop(const v8::FunctionCallbackInfo<v8::Value>& info) {
     mCB.Reset();
     mState = kStop;
     uv_thread_join(&mThread);
@@ -704,11 +272,11 @@ void HumixSpeech::sPlay(const v8::FunctionCallbackInfo<v8::Value>& info) {
                 Nan::New("Usage: play(filename)").ToLocalChecked()));
         return;
     }
-    hs->play(info);
+    hs->Play(info);
 }
 
 void
-HumixSpeech::play(const v8::FunctionCallbackInfo<v8::Value>& info) {
+HumixSpeech::Play(const v8::FunctionCallbackInfo<v8::Value>& info) {
     v8::String::Utf8Value filename(info[0]);
     uv_mutex_lock(&mAplayMutex);
     mAplayFiles.push(*filename);
@@ -777,7 +345,7 @@ void HumixSpeech::sLoop(void* arg) {
                 printf("receive aplay command:%s\n", file.c_str());
                 {
                     WavPlayer player(file.c_str());
-                    player.play();
+                    player.Play();
                 }
                 ad_start_rec(ad);
             }
@@ -807,15 +375,15 @@ void HumixSpeech::sLoop(void* arg) {
                     hyp = ps_get_hyp(ps, NULL);
                     if (hyp != NULL && strcmp("HUMIX", hyp) == 0) {
                         _this->mState = kWaitCommand;
-                        printf("keyword HUMIX found\n");
-                        fflush(stdout);
                         if (_this->mWatsonTTS ) {
                             _this->mWatsonTTS->WSConnect();
                         }
+                        printf("keyword HUMIX found\n");
+                        fflush(stdout);
                         ad_stop_rec(ad);
                         {
                             WavPlayer player(_this->mWavSay);
-                            player.play();
+                            player.Play();
                         }
                         ad_start_rec(ad);
                         printf("Waiting for a command...");
@@ -833,19 +401,26 @@ void HumixSpeech::sLoop(void* arg) {
                     printf("Listening the command...\n");
                     _this->mState = kCommand;
                     if ( _this->mWatsonTTS ) {
-                        _this->mWatsonTTS->sendVoiceWav((char*) adbuf, (uint32_t) (k * 2));
+                        _this->mWatsonTTS->SendVoiceWav((char*) adbuf, (uint32_t) (k * 2));
                     } else {
                         wavWriter = new WavWriter("/dev/shm/test.wav", 1, samprate);
-                        wavWriter->writeHeader();
-                        wavWriter->writeData((char*) adbuf, (size_t) (k * 2));
+                        wavWriter->WriteHeader();
+                        wavWriter->WriteData((char*) adbuf, (size_t) (k * 2));
                     }
                 } else {
                     //increase waiting count;
                     if (++waitCount > 100) {
                         waitCount = 0;
+                        if ( _this->mWatsonTTS ) {
+                            //keep connection
+                            _this->mWatsonTTS->SendSilentWav();
+                        }
                         if (++humixCount > 20) {
                             //exit humix-loop
                             _this->mState = kReady;
+                            if (_this->mWatsonTTS ) {
+                                _this->mWatsonTTS->Stop();
+                            }
                             printf("READY....\n");
                         } else {
                             printf(".");
@@ -860,16 +435,16 @@ void HumixSpeech::sLoop(void* arg) {
                 if (in_speech) {
                     //keep receiving command
                     if ( _this->mWatsonTTS ) {
-                        _this->mWatsonTTS->sendVoiceWav((char*) adbuf, (uint32_t) (k * 2));
+                        _this->mWatsonTTS->SendVoiceWav((char*) adbuf, (uint32_t) (k * 2));
                     } else {
-                        wavWriter->writeData((char*) adbuf, (size_t) (k * 2));
+                        wavWriter->WriteData((char*) adbuf, (size_t) (k * 2));
                     }
                 } else {
                     if ( _this->mWatsonTTS ) {
-                        _this->mWatsonTTS->sendVoiceWav((char*) adbuf, (uint32_t) (k * 2));
-                        _this->mWatsonTTS->sendSilentWav();
+                        _this->mWatsonTTS->SendVoiceWav((char*) adbuf, (uint32_t) (k * 2));
+                        _this->mWatsonTTS->SendSilentWav();
                     } else {
-                        wavWriter->writeData((char*) adbuf, (size_t) (k * 2));
+                        wavWriter->WriteData((char*) adbuf, (size_t) (k * 2));
                         delete wavWriter;
                         wavWriter = NULL;
                     }
@@ -880,10 +455,10 @@ void HumixSpeech::sLoop(void* arg) {
                     ad_stop_rec(ad);
                     {
                         WavPlayer player(_this->mWavProc);
-                        player.play();
+                        player.Play();
                     }
                     if ( !_this->mWatsonTTS ) {
-                        int result = _this->processCommand(msg, 1024);
+                        int result = _this->ProcessCommand(msg, 1024);
                         if (result == 0) {
                             uv_async_t* async = new uv_async_t;
                             async->data = _this;
@@ -959,7 +534,7 @@ v8::Local<v8::FunctionTemplate> HumixSpeech::sFunctionTemplate(
     return scope.Escape(tmpl);
 }
 
-int HumixSpeech::processCommand(char* msg, int len) {
+int HumixSpeech::ProcessCommand(char* msg, int len) {
     int filedes[2];
     if (pipe(filedes) == -1) {
         printf("pipe error");

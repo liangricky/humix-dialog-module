@@ -2,7 +2,10 @@
   "targets": [
     {
       "target_name": "HumixSpeech",
-      "sources": [ "./src/HumixSpeech.cpp"
+      "sources": [
+        "./src/wavutil.cpp",
+        "./src/watsontts.cpp",
+        "./src/HumixSpeech.cpp"
       ],
       "include_dirs": [ "<!(node -e \"require('nan')\")",
         "./deps/sphinxbase-5prealpha/include",
