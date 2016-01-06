@@ -19,7 +19,7 @@ $(OBJ_SPHINXBASE):
 
 $(OBJ_SPHINXAD): $(OBJ_SPHINXBASE)
 
-$(OBJ_POCKETSPHINX): deps $(OBJ_SPHINXBASE)
+$(OBJ_POCKETSPHINX): $(OBJ_SPHINXBASE)
 	tar -xf deps/pocketsphinx-$(POCKETSPHINX_VER).tar.gz -C deps
 	cd deps/pocketsphinx-$(POCKETSPHINX_VER); export CFLAGS=" -g -O2 -Wall -fPIC"; ./configure
 	make -C deps/pocketsphinx-$(POCKETSPHINX_VER)/src/libpocketsphinx
