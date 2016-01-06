@@ -33,6 +33,9 @@ public:
     ~FLACEncoder();
 
     bool Init(uint32_t rate, uint8_t channel);
+    FLAC__StreamEncoderInitStatus init();
+    bool finish();
+
 
 protected:
     FLAC__StreamEncoderWriteStatus write_callback(const FLAC__byte buffer[], size_t bytes, unsigned samples, unsigned current_frame);
@@ -42,6 +45,7 @@ protected:
     char mHeader[4096];
     size_t mHeaderIndex;
     bool mHeaderSent;
+    char mWavHeader[44];
 };
 
 /**
@@ -78,13 +82,13 @@ public:
             if ( alloc ) {
                 mData = (char*)malloc(size);
                 memcpy(mData, data, size);
-                if ( le ) {
-                    for ( uint32_t i = 0; i < size ; i+=2) {
-                        char t = mData[i];
-                        mData[i] = mData[i+1];
-                        mData[i+1] = t;
-                    }
-                }
+//                if ( le ) {
+//                    for ( uint32_t i = 0; i < size ; i+=2) {
+//                        char t = mData[i];
+//                        mData[i] = mData[i+1];
+//                        mData[i+1] = t;
+//                    }
+//                }
             } else {
                 mData = const_cast<char*>(data);
             }
