@@ -30,6 +30,9 @@ var HumixSpeech = require('./lib/HumixSpeech').HumixSpeech;
 
 var voice_path = path.join(__dirname, 'voice');
 var url = 'http://tts.itri.org.tw/TTSService/Soap_1_3.php?wsdl';
+var kGoogle = 0,
+    kWatson = 1;
+var engineIndex = {'google': kGoogle, 'watson': kWatson };
 
 function convertText(text, hash, callback) {
     var args = {
@@ -127,25 +130,32 @@ var commandRE = /---="(.*)"=---/;
  */
 function receiveCommand(cmdstr) {
     cmdstr = cmdstr.trim();
-    var match = commandRE.exec(cmdstr);
-    if ( match && match.length == 2 ) {
-        var cmd = match[1];
-        console.error('command found:', cmd);
-        try {
-            nats.publish('humix.sense.speech.event', cmd);
-        } catch ( e ) {
-            console.error('can not publish to nats:', e);
-        }
-        //echo mode
-        //text2Speech( '{ "text" : "' + cmd + '" }' );
-        if ( hs && cmd.indexOf('聖誕') != -1 && cmd.indexOf('快樂') != -1 ) {
-            hs.play('./voice/music/jingle_bells.wav');
+    if ( config.engine ) {
+        console.error('command found:', cmdstr);
+    } else {
+        var match = commandRE.exec(cmdstr);
+        if ( match && match.length == 2 ) {
+            var cmd = match[1];
+            console.error('command found:', cmd);
+            try {
+                nats.publish('humix.sense.speech.event', cmd);
+            } catch ( e ) {
+                console.error('can not publish to nats:', e);
+            }
+            //echo mode
+            //text2Speech( '{ "text" : "' + cmd + '" }' );
+            if ( hs && cmd.indexOf('聖誕') != -1 && cmd.indexOf('快樂') != -1 ) {
+                hs.play('./voice/music/jingle_bells.wav');
+            }
         }
     }
 }
 
 try {
     hs = new HumixSpeech(config.options);
+    var engine = config.engine || 'google';
+    hs.engine( config[engine].username, config[engine].passwd,
+    		engineIndex[engine], require('./lib/' + engine).startSession);
     hs.start(receiveCommand);
 } catch ( error ) {
     console.error(error);
@@ -235,9 +245,9 @@ process.on('error', function() {
 
 process.on('uncaughtException', function(err) {
     if ( err.toString().indexOf('connect ECONNREFUSED') ) {
-        console.error('nats connection failed');
-        cleanup();
-        process.exit(0);
+        console.error('exception,', JSON.stringify(err));
+        //cleanup();
+        //process.exit(0);
     }
 });
 
