@@ -12,6 +12,7 @@ speech-to-text and text-to-speech enabling project for Humix
     - sudo apt-get install mplayer
     - sudo apt-get install flac
     - sudo apt-get install libsndfile1-dev
+    - sudo apt-get install libflac++-dev
 
 - nodes modules:
     - npm install nats soap
