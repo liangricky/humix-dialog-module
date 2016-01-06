@@ -14,7 +14,7 @@
 * limitations under the License.
 *******************************************************************************/
 
-#include "wavutil.hpp"
+#include "WavUtil.hpp"
 
 
 void WavWriter::WriteHeader() {

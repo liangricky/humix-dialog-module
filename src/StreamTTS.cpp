@@ -16,7 +16,49 @@
 #include <sndfile.h>
 #include "StreamTTS.hpp"
 
-StreamTTS::StreamTTS(const char* username, const char* passwd, Engine engine, v8::Local<v8::Function> func)
+FLACEncoder::FLACEncoder(StreamTTS* tts)
+    : FLAC::Encoder::Stream(), mTTS(tts), mReady(false),
+      mHeaderIndex(0), mHeaderSent(false){
+
+}
+
+FLACEncoder::~FLACEncoder() {
+    if (mReady) {
+        finish();
+    }
+}
+
+bool
+FLACEncoder::Init(uint32_t rate, uint8_t channel)
+{
+    bool rev = true;
+    rev &= set_verify(false);
+    rev &= set_compression_level(5);
+    rev &= set_channels(channel);
+    rev &= set_bits_per_sample(16);//S16_LE
+    rev &= set_sample_rate(rate);
+    rev &= set_total_samples_estimate(0);
+    mReady = rev;
+    return rev;
+}
+
+FLAC__StreamEncoderWriteStatus
+FLACEncoder::write_callback(const FLAC__byte buffer[], size_t bytes, unsigned samples, unsigned current_frame) {
+    if ( samples == 0 ) {
+        memcpy(mHeader + mHeaderIndex, buffer, bytes);
+        mHeaderIndex += bytes;
+        return FLAC__STREAM_ENCODER_WRITE_STATUS_OK;
+    } else {
+        if ( !mHeaderSent ) {
+            mTTS->SendVoiceRaw((char*)mHeader, mHeaderIndex);
+            mHeaderSent = true;
+        }
+        mTTS->SendVoiceRaw((char*)buffer, bytes);
+        return FLAC__STREAM_ENCODER_WRITE_STATUS_OK;
+    }
+}
+
+StreamTTS::StreamTTS(const char* username, const char* passwd, Engine engine, bool flac, v8::Local<v8::Function> func)
         : mUserName(strdup(username)), mPasswd(strdup(passwd)),
           mEngine(engine) {
 
@@ -37,6 +79,16 @@ StreamTTS::StreamTTS(const char* username, const char* passwd, Engine engine, v8
         }
     }
     sf_close(silent);
+    uv_mutex_init(&mQueueMutex);
+    //this will be delete in uv_close callback
+    mWriteAsync = new uv_async_t;
+    mWriteAsync->data = this;
+    uv_async_init(uv_default_loop(), mWriteAsync,
+            sWrite);
+    mEncoder = NULL;
+    if ( flac ) {
+        mEncoder = new FLACEncoder(this);
+    }
 }
 
 StreamTTS::~StreamTTS() {
@@ -45,6 +97,9 @@ StreamTTS::~StreamTTS() {
     mObj.Reset();
     mFunc.Reset();
     mCB.Reset();
+    uv_close(reinterpret_cast<uv_handle_t*>(mWriteAsync), sFreeHandle);
+    uv_mutex_destroy(&mQueueMutex);
+    delete mEncoder;
 }
 
 /*static*/
@@ -87,6 +142,9 @@ StreamTTS::CreateSession() {
             v8::Local<v8::Value> cb[] = { Nan::New("connect").ToLocalChecked(), GetListeningFunction(isolate) };
             Nan::MakeCallback(session, "on", 2, cb);
         }
+        if ( mEncoder ) {
+            mEncoder->init();
+        }
     }
 }
 
@@ -104,9 +162,8 @@ void StreamTTS::sCreateSession(uv_async_t* handle) {
 
 /*static*/
 void StreamTTS::sWrite(uv_async_t* handle) {
-    WriteData* wd = (WriteData*)handle->data;
-    wd->mThis->Write(wd);
-    uv_close(reinterpret_cast<uv_handle_t*>(handle), sFreeHandle);
+    StreamTTS* _this = reinterpret_cast<StreamTTS*>(handle->data);
+    _this->Write();
 }
 
 void
@@ -148,22 +205,42 @@ StreamTTS::CloseSession() {
         v8::Local<v8::Object> req = v8::Local<v8::Object>::New(isolate, mObj);
         Nan::MakeCallback(req, "end", 0, NULL);
     }
+    if ( mEncoder ) {
+        delete mEncoder;
+        mEncoder = new FLACEncoder(this);
+    }
     mObj.Reset();
 }
 
 void
-StreamTTS::Write(WriteData* data) {
+StreamTTS::Write() {
     v8::Isolate* isolate = v8::Isolate::GetCurrent();
     v8::HandleScope scope(isolate);
     if ( mObj.IsEmpty() ) {
         return;
     }
-    v8::Local<v8::Object> obj = v8::Local<v8::Object>::New(isolate, mObj);
-    v8::Local<v8::Object> buff;
-    if ( Nan::NewBuffer(data->mData, data->mSize, sFreeCallback, data).ToLocal(&buff) ) {
-        v8::Local<v8::Value> args[] = { buff };
-        Nan::MakeCallback(obj, "write", 1, args);
-    }
+    bool cont = false;
+    WriteData* data = NULL;
+    do {
+        data = NULL;
+        uv_mutex_lock(&mQueueMutex);
+        if ( mWriteQueue.size() ) {
+            data = mWriteQueue.front();
+            mWriteQueue.pop();
+        }
+        uv_mutex_unlock(&mQueueMutex);
+        if ( data ) {
+            v8::Local<v8::Object> obj = v8::Local<v8::Object>::New(isolate, mObj);
+            v8::Local<v8::Object> buff;
+            if ( Nan::NewBuffer(data->mData, data->mSize, sFreeCallback, data).ToLocal(&buff) ) {
+                v8::Local<v8::Value> args[] = { buff };
+                Nan::MakeCallback(obj, "write", 1, args);
+            }
+        }
+        uv_mutex_lock(&mQueueMutex);
+        cont = (mWriteQueue.size() > 0);
+        uv_mutex_unlock(&mQueueMutex);
+    } while (cont);
 }
 
 /*static*/
@@ -173,23 +250,53 @@ void StreamTTS::sFreeCallback(char* data, void* hint) {
 }
 
 void
+StreamTTS::SendVoiceRaw(char* data, uint32_t length) {
+        uv_mutex_lock(&mQueueMutex);
+        mWriteQueue.push(new WriteData(data, length, this, true, false));
+        uv_mutex_unlock(&mQueueMutex);
+        uv_async_send(mWriteAsync);
+}
+
+void
+StreamTTS::EncodeWav(char* data, uint32_t length, bool be) {
+    uint32_t frames = length/2;
+    if ( be ) {
+        for(uint32_t i = 0; i < frames; i++) {
+            mBuff[i] = (FLAC__int32)(((FLAC__int16)(FLAC__int8)data[i*2] << 8) | (FLAC__int16)data[i*2+1]);
+        }
+    } else {
+        for(uint32_t i = 0; i < frames; i++) {
+            /* inefficient but simple and works on big- or little-endian machines */
+            mBuff[i] = (FLAC__int32)(((FLAC__int16)(FLAC__int8)data[i*2 + 1] << 8) | (FLAC__int16)data[i*2]);
+        }
+    }
+    mEncoder->process_interleaved(mBuff, frames);
+}
+
+void
 StreamTTS::SendVoiceWav(char* data, uint32_t length) {
     if ( length > 0 ) {
-        uv_async_t* async = new uv_async_t;
-        async->data = new WriteData(data, length, this, true, mEngine == kWatson);
-        uv_async_init(uv_default_loop(), async,
-                sWrite);
-        uv_async_send(async);
+        if ( mEncoder ) {
+            EncodeWav(data, length, false);
+        } else {
+            uv_mutex_lock(&mQueueMutex);
+            mWriteQueue.push(new WriteData(data, length, this, true, mEngine == kWatson));
+            uv_mutex_unlock(&mQueueMutex);
+            uv_async_send(mWriteAsync);
+        }
     }
 }
 
 void
 StreamTTS::SendSilentWav() {
-    uv_async_t* async = new uv_async_t;
-    async->data = new WriteData(mSilent, ONE_SEC_FRAMES*2, this, false);
-    uv_async_init(uv_default_loop(), async,
-            sWrite);
-    uv_async_send(async);
+    if ( mEncoder ) {
+        EncodeWav(mSilent, ONE_SEC_FRAMES*2, mEngine == kWatson);
+    } else {
+        uv_mutex_lock(&mQueueMutex);
+        mWriteQueue.push(new WriteData(mSilent, ONE_SEC_FRAMES*2, this, false));
+        uv_mutex_unlock(&mQueueMutex);
+        uv_async_send(mWriteAsync);
+    }
 }
 
 void

@@ -26,7 +26,7 @@
 #include "HumixSpeech.hpp"
 
 #include "StreamTTS.hpp"
-#include "wavutil.hpp"
+#include "WavUtil.hpp"
 
 /* Sleep for specified msec */
 static void sleep_msec(int32 ms) {
@@ -304,7 +304,9 @@ void HumixSpeech::sSetupEngine(const v8::FunctionCallbackInfo<v8::Value>& info) 
     v8::String::Utf8Value username(info[0]);
     v8::String::Utf8Value passwd(info[1]);
     v8::Local<v8::Number> engine = info[2]->ToNumber(ctx).ToLocalChecked();
-    hs->mStreamTTS = new StreamTTS(*username, *passwd, (StreamTTS::Engine)(engine->Int32Value()),
+    hs->mStreamTTS = new StreamTTS(*username, *passwd,
+            (StreamTTS::Engine)(engine->Int32Value()),
+            false,
             info[3].As<v8::Function>());
 }
 

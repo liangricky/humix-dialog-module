@@ -3,7 +3,7 @@
     {
       "target_name": "HumixSpeech",
       "sources": [
-        "./src/wavutil.cpp",
+        "./src/WavUtil.cpp",
         "./src/StreamTTS.cpp",
         "./src/HumixSpeech.cpp"
       ],
@@ -16,7 +16,7 @@
         "../deps/sphinxbase-5prealpha/src/libsphinxad/.libs/libsphinxad.a",
         "../deps/pocketsphinx-5prealpha/src/libpocketsphinx/.libs/libpocketsphinx.a",
         "-Wl,--no-whole-archive",
-        "-lasound", "-lpthread", "-lsndfile"
+        "-lasound", "-lpthread", "-lsndfile", "-lFLAC++"
       ]
     },
     {

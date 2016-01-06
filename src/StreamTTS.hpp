@@ -19,7 +19,30 @@
 
 #include <nan.h>
 
+#include <queue>
+#include "FLAC++/metadata.h"
+#include "FLAC++/encoder.h"
+
 #define ONE_SEC_FRAMES 16000
+
+class StreamTTS;
+
+class FLACEncoder: public FLAC::Encoder::Stream {
+public:
+    FLACEncoder(StreamTTS* tts);
+    ~FLACEncoder();
+
+    bool Init(uint32_t rate, uint8_t channel);
+
+protected:
+    FLAC__StreamEncoderWriteStatus write_callback(const FLAC__byte buffer[], size_t bytes, unsigned samples, unsigned current_frame);
+
+    StreamTTS* mTTS;
+    bool mReady;
+    char mHeader[4096];
+    size_t mHeaderIndex;
+    bool mHeaderSent;
+};
 
 /**
  * This is a Wrapper class for the JS function.
@@ -36,7 +59,8 @@ public:
      * create a Watson TTS wrapper with the username and passwd.
      * the most important part is the Watson JS function
      */
-    StreamTTS(const char* username, const char* passwd, Engine engine, v8::Local<v8::Function> func);
+    StreamTTS(const char* username, const char* passwd,
+            Engine engine, bool flac, v8::Local<v8::Function> func);
 
     ~StreamTTS();
 
@@ -47,14 +71,14 @@ public:
     public:
         /**
          * store S16_BE data to be sent over network, it will do
-         * LE to BE converting if the alloc=true
+         * LE to BE converting if the alloc=true and le=true
          */
-        WriteData(const char* data, uint32_t size, StreamTTS* tts, bool alloc, bool be = true)
+        WriteData(const char* data, uint32_t size, StreamTTS* tts, bool alloc, bool le = true)
                 : mAlloced(alloc){
             if ( alloc ) {
                 mData = (char*)malloc(size);
                 memcpy(mData, data, size);
-                if ( be ) {
+                if ( le ) {
                     for ( uint32_t i = 0; i < size ; i+=2) {
                         char t = mData[i];
                         mData[i] = mData[i+1];
@@ -109,8 +133,11 @@ public:
     void SendSilentWav();
 
     void SendIdleSilent();
+
+    void SendVoiceRaw(char* data, uint32_t length);
 private:
 
+    void EncodeWav(char* data, uint32_t length, bool be = true);
     /**
      * callback for the async handle for calling
      * the Watson JS function to create TTS session
@@ -147,7 +174,7 @@ private:
     /**
      * call ws.write() to write data to TTS service
      */
-    void Write(WriteData* data);
+    void Write();
 
     /**
      * call JS function to create TTS session
@@ -169,6 +196,11 @@ private:
     v8::Persistent<v8::Function> mCB;
     v8::Persistent<v8::Object> mConn;
     Engine mEngine;
+    uv_async_t* mWriteAsync;
+    std::queue<WriteData*> mWriteQueue;
+    uv_mutex_t mQueueMutex;
+    FLACEncoder* mEncoder;
+    FLAC__int32 mBuff[ONE_SEC_FRAMES];
 };
 
 #endif /* SRC_STREAMTTS_HPP_ */
