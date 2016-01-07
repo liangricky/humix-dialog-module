@@ -350,7 +350,7 @@ void HumixSpeech::sLoop(void* arg) {
                 ad_stop_rec(ad);
                 std::string file = _this->mAplayFiles.front();
                 _this->mAplayFiles.pop();
-                printf("receive aplay command:%s\n", file.c_str());
+                printf("play:%s\n", file.c_str());
                 {
                     WavPlayer player(file.c_str());
                     player.Play();
@@ -371,7 +371,7 @@ void HumixSpeech::sLoop(void* arg) {
                 humixCount = 0;
                 if (in_speech) {
                     _this->mState = kKeyword;
-                    printf("Waiting for keyward: HUMIX... \n");
+                    printf("Waiting for keyward: HUMIX...\n");
                 }
                 break;
             case kKeyword:
