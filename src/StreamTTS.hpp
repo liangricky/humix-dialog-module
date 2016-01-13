@@ -107,6 +107,8 @@ public:
      */
     void WSConnect();
 
+    void ReConnectIfNeeded();
+
     /**
      * Set the callback function. need to be called in main loop
      */
@@ -195,6 +197,7 @@ private:
     v8::Persistent<v8::Function> mFunc;
     v8::Persistent<v8::Function> mCB;
     v8::Persistent<v8::Object> mConn;
+    v8::Persistent<v8::Function> mConnCB;
     Engine mEngine;
     uv_async_t* mWriteAsync;
     std::queue<WriteData*> mWriteQueue;
