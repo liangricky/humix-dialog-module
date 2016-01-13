@@ -16,15 +16,43 @@
 #include <sndfile.h>
 #include "StreamTTS.hpp"
 
+#include <fstream>
+
 FLACEncoder::FLACEncoder(StreamTTS* tts)
     : FLAC::Encoder::Stream(), mTTS(tts), mReady(false),
-      mHeaderIndex(0), mHeaderSent(false){
+      mHeaderIndex(0), mHeaderSent(false) {
+    std::ifstream ifs ("./voice/interlude/pleasesay1.wav", std::ifstream::in);
+    ifs.read(mWavHeader, 44);
+    ifs.close();
+    mWavHeader[40] = 0x60;
+    mWavHeader[41] = 0x6d;
+    mWavHeader[42] = 0x0;
+    mWavHeader[43] = 0x0;
+}
 
+FLAC__StreamEncoderInitStatus
+FLACEncoder::init() {
+    FLAC__int32 buff[22];
+    FLAC__StreamEncoderInitStatus rev = FLAC::Encoder::Stream::init();
+    //write wav header
+    for(uint32_t i = 0; i < 22; i++) {
+        buff[i] = (FLAC__int32)(((FLAC__int16)(FLAC__int8)mWavHeader[i*2+1] << 8) | (FLAC__int16)mWavHeader[i*2]);
+    }
+    process_interleaved(buff, 22);
+    return rev;
+}
+
+bool
+FLACEncoder::finish() {
+    mHeaderIndex = 0;
+    mReady = false;
+    mHeaderSent = false;
+    return FLAC::Encoder::Stream::finish();
 }
 
 FLACEncoder::~FLACEncoder() {
     if (mReady) {
-        finish();
+        FLAC::Encoder::Stream::finish();
     }
 }
 
@@ -37,13 +65,26 @@ FLACEncoder::Init(uint32_t rate, uint8_t channel)
     rev &= set_channels(channel);
     rev &= set_bits_per_sample(16);//S16_LE
     rev &= set_sample_rate(rate);
+    rev &= set_blocksize(1152);
+    rev &= set_max_lpc_order(8);
+    rev &= set_max_residual_partition_order(5);
+    rev &= set_loose_mid_side_stereo(false);
     rev &= set_total_samples_estimate(0);
     mReady = rev;
     return rev;
 }
 
+//std::ofstream debug("myflac.flac", std::ofstream::out | std::ofstream::trunc);
+
 FLAC__StreamEncoderWriteStatus
 FLACEncoder::write_callback(const FLAC__byte buffer[], size_t bytes, unsigned samples, unsigned current_frame) {
+//    printf("size:%lu, frame:%u\n", bytes, current_frame);
+//    if ( current_frame < 50) {
+//        debug.write((char*)buffer, bytes);
+//    } else {
+//        debug.close();
+//    }
+
     if ( samples == 0 ) {
         memcpy(mHeader + mHeaderIndex, buffer, bytes);
         mHeaderIndex += bytes;
@@ -70,15 +111,15 @@ StreamTTS::StreamTTS(const char* username, const char* passwd, Engine engine, bo
         printf("can't open silent wav: %s\n", sf_strerror(NULL));
         return;
     }
-    sf_count_t count = sf_readf_short(silent, (short*) mSilent, ONE_SEC_FRAMES) * 2;
-    if ( engine == kWatson ) {
-        char p = '0';
-        for (sf_count_t i = 0; i < count ; i+=2) {
-            p = mSilent[i];
-            mSilent[i] = mSilent[i+1];
-            mSilent[i+1] = p;
-        }
-    }
+    /*sf_count_t count = */sf_readf_short(silent, (short*) mSilent, ONE_SEC_FRAMES)/* * 2*/;
+//    if ( engine == kWatson ) {
+//        char p = '0';
+//        for (sf_count_t i = 0; i < count ; i+=2) {
+//            p = mSilent[i];
+//            mSilent[i] = mSilent[i+1];
+//            mSilent[i+1] = p;
+//        }
+//    }
     sf_close(silent);
     uv_mutex_init(&mQueueMutex);
     //this will be delete in uv_close callback
@@ -167,6 +208,7 @@ StreamTTS::CreateSession() {
             Nan::MakeCallback(session, "on", 2, cb);
         }
         if ( mEncoder ) {
+            mEncoder->Init(16000, 1);
             mEncoder->init();
         }
     }
@@ -294,8 +336,7 @@ StreamTTS::EncodeWav(char* data, uint32_t length, bool be) {
         }
     } else {
         for(uint32_t i = 0; i < frames; i++) {
-            /* inefficient but simple and works on big- or little-endian machines */
-            mBuff[i] = (FLAC__int32)(((FLAC__int16)(FLAC__int8)data[i*2 + 1] << 8) | (FLAC__int16)data[i*2]);
+            mBuff[i] = (FLAC__int32)(((FLAC__int16)(FLAC__int8)data[i*2+1] << 8) | (FLAC__int16)data[i*2]);
         }
     }
     mEncoder->process_interleaved(mBuff, frames);
@@ -318,7 +359,7 @@ StreamTTS::SendVoiceWav(char* data, uint32_t length) {
 void
 StreamTTS::SendSilentWav() {
     if ( mEncoder ) {
-        EncodeWav(mSilent, ONE_SEC_FRAMES*2, mEngine == kWatson);
+        EncodeWav(mSilent, ONE_SEC_FRAMES*2, false);
     } else {
         uv_mutex_lock(&mQueueMutex);
         mWriteQueue.push(new WriteData(mSilent, ONE_SEC_FRAMES*2, this, false));
