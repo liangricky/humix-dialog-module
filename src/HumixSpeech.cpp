@@ -104,7 +104,7 @@ HumixSpeech::HumixSpeech(const v8::FunctionCallbackInfo<v8::Value>& args)
 
     mCMDProc = sGetObjectPropertyAsString(ctx, config, "cmdproc", "./util/processcmd.sh");
     mWavSay =  sGetObjectPropertyAsString(ctx, config, "wav-say", "./voice/interlude/pleasesay1.wav");
-    mWavProc =  sGetObjectPropertyAsString(ctx, config, "wav-say", "./voice/interlude/process1.wav");
+    mWavProc =  sGetObjectPropertyAsString(ctx, config, "wav-proc", "./voice/interlude/process1.wav");
     mWavBye =  sGetObjectPropertyAsString(ctx, config, "wav-bye", "./voice/interlude/bye.wav");
     mLang =  sGetObjectPropertyAsString(ctx, config, "lang", "zh-tw");
     mSampleRate =  sGetObjectPropertyAsString(ctx, config, "samprate", "16000");
@@ -327,6 +327,7 @@ void HumixSpeech::sLoop(void* arg) {
     int samprate = (int) cmd_ln_float32_r(_this->mConfig, "-samprate");
 
     WavWriter *wavWriter = NULL;
+    setbuf(stdout, NULL);
 
     if ((ad = ad_open_dev(cmd_ln_str_r(_this->mConfig, "-adcdev"), samprate)) == NULL) {
         E_FATAL("Failed to open audio device\n");
@@ -348,6 +349,7 @@ void HumixSpeech::sLoop(void* arg) {
             if (!_this->mAplayFiles.empty()) {
                 ad_stop_rec(ad);
                 std::string file = _this->mAplayFiles.front();
+                _this->mAplayFiles.pop();
                 printf("receive aplay command:%s\n", file.c_str());
                 {
                     WavPlayer player(file.c_str());

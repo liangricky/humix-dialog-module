@@ -27,6 +27,10 @@
         "destination": "./lib/",
         "files": [
           "<(PRODUCT_DIR)/HumixSpeech.node"
+        ]},
+        {"destination": "./node_modules/watson-developer-cloud/services/speech_to_text",
+        "files": [
+          "./watson-fix/v1.js"
         ]}
       ]
     }
