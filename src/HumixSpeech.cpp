@@ -348,6 +348,7 @@ void HumixSpeech::sLoop(void* arg) {
             if (!_this->mAplayFiles.empty()) {
                 ad_stop_rec(ad);
                 std::string file = _this->mAplayFiles.front();
+                _this->mAplayFiles.pop();
                 printf("receive aplay command:%s\n", file.c_str());
                 {
                     WavPlayer player(file.c_str());
