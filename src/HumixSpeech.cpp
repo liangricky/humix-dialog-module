@@ -387,7 +387,6 @@ void HumixSpeech::sLoop(void* arg) {
                             _this->mStreamTTS->WSConnect();
                         }
                         printf("keyword HUMIX found\n");
-                        fflush(stdout);
                         ad_stop_rec(ad);
                         {
                             WavPlayer player(_this->mWavSay);
@@ -409,6 +408,7 @@ void HumixSpeech::sLoop(void* arg) {
                     printf("Listening the command...\n");
                     _this->mState = kCommand;
                     if ( _this->mStreamTTS ) {
+                        _this->mStreamTTS->ReConnectIfNeeded();
                         _this->mStreamTTS->SendVoiceWav((char*) adbuf, (uint32_t) (k * 2));
                     } else {
                         wavWriter = new WavWriter("/dev/shm/test.wav", 1, samprate);
@@ -429,6 +429,12 @@ void HumixSpeech::sLoop(void* arg) {
                             if (_this->mStreamTTS ) {
                                 _this->mStreamTTS->Stop();
                             }
+                            ad_stop_rec(ad);
+                            {
+                                WavPlayer player(_this->mWavBye);
+                                player.Play();
+                            }
+                            ad_start_rec(ad);
                             printf("READY....\n");
                         } else {
                             printf(".");

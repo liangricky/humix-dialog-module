@@ -62,7 +62,8 @@ StreamTTS::StreamTTS(const char* username, const char* passwd, Engine engine, bo
         : mUserName(strdup(username)), mPasswd(strdup(passwd)),
           mEngine(engine) {
 
-    mFunc.Reset(func->CreationContext()->GetIsolate(), func);
+    v8::Isolate* isolate = func->CreationContext()->GetIsolate();
+    mFunc.Reset(isolate, func);
     SF_INFO sfinfo;
     SNDFILE* silent = sf_open("./voice/interlude/empty.wav", SFM_READ, &sfinfo);
     if (!silent) {
@@ -89,6 +90,7 @@ StreamTTS::StreamTTS(const char* username, const char* passwd, Engine engine, bo
     if ( flac ) {
         mEncoder = new FLACEncoder(this);
     }
+    mConnCB.Reset(isolate, GetListeningFunction(isolate));
 }
 
 StreamTTS::~StreamTTS() {
@@ -97,6 +99,8 @@ StreamTTS::~StreamTTS() {
     mObj.Reset();
     mFunc.Reset();
     mCB.Reset();
+    mConnCB.Reset();
+    mConn.Reset();
     uv_close(reinterpret_cast<uv_handle_t*>(mWriteAsync), sFreeHandle);
     uv_mutex_destroy(&mQueueMutex);
     delete mEncoder;
@@ -109,7 +113,19 @@ StreamTTS::sListening(const v8::FunctionCallbackInfo<v8::Value>& info) {
     v8::Local<v8::Object> data = info.Data()->ToObject(ctx).ToLocalChecked();
     assert(data->InternalFieldCount() > 0);
     StreamTTS* _this = reinterpret_cast<StreamTTS*>(data->GetAlignedPointerFromInternalField(0));
-    _this->mConn.Reset(info.GetIsolate(), info[0]->ToObject(ctx).ToLocalChecked());
+    if ( _this->mEngine == kWatson ) {
+        if ( info.Length() == 1 ) {
+            //connect event
+            _this->mConn.Reset(info.GetIsolate(), info[0]->ToObject(ctx).ToLocalChecked());
+        } else if ( info.Length() == 2 ) {
+            //connection-close event
+            _this->mObj.Reset();
+            _this->mConn.Reset();
+        }
+    } else if ( _this->mEngine == kGoogle ) {
+        //speech-closed event
+        _this->mObj.Reset();
+    }
 }
 
 v8::Local<v8::Function>
@@ -139,7 +155,15 @@ StreamTTS::CreateSession() {
         mObj.Reset(isolate, session);
         if ( mEngine == kWatson ) {
             //watson need the connection object to perform the close();
-            v8::Local<v8::Value> cb[] = { Nan::New("connect").ToLocalChecked(), GetListeningFunction(isolate) };
+            v8::Local<v8::Value> cb[] = { Nan::New("connect").ToLocalChecked(),
+                    v8::Local<v8::Function>::New(isolate, mConnCB)};
+            Nan::MakeCallback(session, "on", 2, cb);
+            v8::Local<v8::Value> cb2[] = { Nan::New("connection-close").ToLocalChecked(),
+                    v8::Local<v8::Function>::New(isolate, mConnCB)};
+            Nan::MakeCallback(session, "on", 2, cb2);
+        } else if ( mEngine == kGoogle ) {
+            v8::Local<v8::Value> cb[] = { Nan::New("speech-closed").ToLocalChecked(),
+                    v8::Local<v8::Function>::New(isolate, mConnCB)};
             Nan::MakeCallback(session, "on", 2, cb);
         }
         if ( mEncoder ) {
@@ -175,6 +199,12 @@ StreamTTS::WSConnect() {
     uv_async_send(async);
 }
 
+void StreamTTS::ReConnectIfNeeded() {
+    if ( mObj.IsEmpty() ) {
+        WSConnect();
+    }
+}
+
 void
 StreamTTS::Stop() {
     uv_async_t* async = new uv_async_t;
@@ -195,13 +225,10 @@ void
 StreamTTS::CloseSession() {
     v8::Isolate* isolate = v8::Isolate::GetCurrent();
     v8::HandleScope scope(isolate);
-    if ( mEngine == kWatson ) {
-        if ( mConn.IsEmpty() ) {
-            return;
-        }
+    if ( mEngine == kWatson && !mConn.IsEmpty() ) {
         v8::Local<v8::Object> conn = v8::Local<v8::Object>::New(isolate, mConn);
         Nan::MakeCallback(conn, "close", 0, NULL);
-    } else if ( mEngine == kGoogle ) {
+    } else if ( mEngine == kGoogle && !mObj.IsEmpty() ) {
         v8::Local<v8::Object> req = v8::Local<v8::Object>::New(isolate, mObj);
         Nan::MakeCallback(req, "end", 0, NULL);
     }
@@ -209,6 +236,7 @@ StreamTTS::CloseSession() {
         delete mEncoder;
         mEncoder = new FLACEncoder(this);
     }
+    mConn.Reset();
     mObj.Reset();
 }
 
