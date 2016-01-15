@@ -26,6 +26,8 @@ var net     = require('net');
 var fs      = require('fs');
 var Buffer  = require('buffer').Buffer;
 var path    = require('path');
+
+var HumixSense = require('node-humix-sense');
 var HumixSpeech = require('./lib/HumixSpeech').HumixSpeech;
 
 var voice_path = path.join(__dirname, 'voice');
@@ -33,6 +35,32 @@ var url = 'http://tts.itri.org.tw/TTSService/Soap_1_3.php?wsdl';
 var kGoogle = 0,
     kWatson = 1;
 var engineIndex = {'google': kGoogle, 'watson': kWatson };
+
+
+var moduleConfig = {
+    "moduleName":"humix-dialog",
+    "commands" : ["say"],
+    "events" : ["speech"],
+    "debug": true
+}
+
+var humix = new HumixSense(moduleConfig);
+var hsm;
+
+humix.on('connection', function(humixSensorModule){
+
+    hsm = humixSensorModule;
+
+    console.log('Communication with humix-sense is now ready.');
+
+    hsm.on('say', function(data){
+        console.log('data:'+data);
+        text2Speech(data);
+    });  // end of say command
+});
+
+
+
 
 function convertText(text, hash, callback) {
     var args = {
@@ -132,6 +160,10 @@ function receiveCommand(cmdstr) {
     cmdstr = cmdstr.trim();
     if ( config.engine ) {
         console.error('command found:', cmdstr);
+        
+        if(hsm)
+            hsm.event("speech", cmdstr);
+
     } else {
         var match = commandRE.exec(cmdstr);
         if ( match && match.length == 2 ) {
