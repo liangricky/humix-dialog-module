@@ -29,13 +29,18 @@ public:
     HumixSpeech(const v8::FunctionCallbackInfo<v8::Value>& args);
     ~HumixSpeech();
 
-    typedef enum {
+    enum State {
         kReady,
         kKeyword,
         kWaitCommand,
         kCommand,
         kStop
-    } State;
+    };
+
+    enum Speech {
+        kAlsa,
+        kNao
+    };
 
     static v8::Local<v8::FunctionTemplate> sFunctionTemplate(
             v8::Isolate* isolate);
@@ -51,6 +56,9 @@ private:
     void Play(const v8::FunctionCallbackInfo<v8::Value>& info);
 
     static void sLoop(void* arg);
+    //use the speech module to say something
+    void Say(const char* msg);
+    void SayYes();
     int ProcessCommand(char* msg, int len);
 
     static void sReceiveCmd(uv_async_t* handle);
@@ -74,6 +82,7 @@ private:
     std::queue<std::string> mAplayFiles;
     std::queue<std::string> mCommands;
     StreamTTS* mStreamTTS;
+    Speech mSpeech;
 };
 
 

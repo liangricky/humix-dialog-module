@@ -47,6 +47,16 @@ var moduleConfig = {
 var humix = new HumixSense(moduleConfig);
 var hsm;
 
+//init NaoSpeech if needed
+if ( config.naoSpeech ) {
+    try {
+        var NaoSpeech = require('./lib/NaoSpeech');
+        NaoSpeech.initNaoSpeech(config.naoSpeech);
+    } catch (e) {
+        console.error('Unable to initialize NaoSpeech:', e);
+    }
+}
+
 humix.on('connection', function(humixSensorModule){
 
     hsm = humixSensorModule;
@@ -58,9 +68,6 @@ humix.on('connection', function(humixSensorModule){
         text2Speech(data);
     });  // end of say command
 });
-
-
-
 
 function convertText(text, hash, callback) {
     var args = {

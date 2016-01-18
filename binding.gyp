@@ -20,13 +20,31 @@
       ]
     },
     {
+      "target_name": "NaoSpeech",
+      "sources": [
+        "./src/NaoSpeech.cpp",
+      ],
+      "include_dirs": [ "<!(node -e \"require('nan')\")",
+        "../ctc-linux64-atom-2.1.4.13/libnaoqi/include",
+      ],
+      "libraries": [ 
+        "-L../ctc-linux64-atom-2.1.4.13/./libnaoqi/lib",
+        "-lalproxies",
+      ]
+    },
+    {
       "target_name": "action_after_build",
       "type": "none",
-      "dependencies": [ "HumixSpeech" ],
+      "dependencies": [ "HumixSpeech", 'NaoSpeech' ],
       "copies": [{
         "destination": "./lib/",
         "files": [
           "<(PRODUCT_DIR)/HumixSpeech.node"
+        ]},
+        {
+        "destination": "./lib/",
+        "files": [
+          "<(PRODUCT_DIR)/NaoSpeech.node"
         ]},
         {"destination": "./node_modules/watson-developer-cloud/services/speech_to_text",
         "files": [
