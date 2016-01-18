@@ -115,6 +115,7 @@ HumixSpeech::HumixSpeech(const v8::FunctionCallbackInfo<v8::Value>& args)
     } else if ( strcmp(speech, "nao") == 0 ) {
         mSpeech = kNao;
     }
+    free(speech);
 
     char const *cfg;
     v8::Local<v8::Array> props = config->GetPropertyNames();
