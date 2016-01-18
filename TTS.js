@@ -236,23 +236,28 @@ function text2Speech(msg) {
     }
     //for safe
     text = text.trim();
-    var hash = crypto.createHash('md5').update(text).digest('hex');
-    console.log ('hash value:', hash);
-    if (wavehash.hasOwnProperty(hash)) {
-        var wav_file = path.join(voice_path,'text', wavehash[hash] + '.wav');
-        console.log('Play hash wav file:', wav_file);
-        sendAplay2HumixSpeech(wav_file);
+    
+    if ( config.options.speech === 'nao' ) {
+        sendAplay2HumixSpeech(text);
     } else {
-        console.log('hash not found');
-        convertText(text, hash, function(err, id, hashvalue) {
-            if (err) {
-                console.log(err); 
-            } else {
-                wavehash[hashvalue] = id;
-                retry = 0;
-                setTimeout(download, 1000, id);
-            }
-        });
+        var hash = crypto.createHash('md5').update(text).digest('hex');
+        console.log ('hash value:', hash);
+        if (wavehash.hasOwnProperty(hash)) {
+            var wav_file = path.join(voice_path,'text', wavehash[hash] + '.wav');
+            console.log('Play hash wav file:', wav_file);
+            sendAplay2HumixSpeech(wav_file);
+        } else {
+            console.log('hash not found');
+            convertText(text, hash, function(err, id, hashvalue) {
+                if (err) {
+                    console.log(err); 
+                } else {
+                    wavehash[hashvalue] = id;
+                    retry = 0;
+                    setTimeout(download, 1000, id);
+                }
+            });
+        }
     }
 }
 
