@@ -84,14 +84,3 @@ void NaoSpeech::sSay(const char* str) {
         uv_mutex_unlock(&sAlSpeechQueueMutex);
     }
 }
-
-void InitModule(v8::Local<v8::Object> target) {
-    v8::Isolate* isolate = v8::Isolate::GetCurrent();
-    Nan::HandleScope scope;
-    v8::Local<v8::Context> ctx = isolate->GetCurrentContext();
-
-    target->Set(ctx, Nan::New("initNaoSpeech").ToLocalChecked(),
-            v8::Function::New(ctx, NaoSpeech::sInitNaoSpeech, v8::Local<v8::Value>(), 0).ToLocalChecked());
-}
-
-NODE_MODULE(NaoSpeech, InitModule);

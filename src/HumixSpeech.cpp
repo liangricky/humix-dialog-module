@@ -623,6 +623,8 @@ void InitModule(v8::Local<v8::Object> target) {
 
     target->Set(ctx, Nan::New("HumixSpeech").ToLocalChecked(),
             ft->GetFunction(ctx).ToLocalChecked());
+    target->Set(ctx, Nan::New("initNaoSpeech").ToLocalChecked(),
+            v8::Function::New(ctx, NaoSpeech::sInitNaoSpeech, v8::Local<v8::Value>(), 0).ToLocalChecked());
 }
 
 NODE_MODULE(HumixSpeech, InitModule);
