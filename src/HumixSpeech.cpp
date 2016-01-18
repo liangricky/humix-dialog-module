@@ -75,7 +75,10 @@ static const arg_t cont_args_def[] = {
      ARG_STRING,
      "zh-tw",
      "language locale."},
-
+     {"-speech",
+      ARG_STRING,
+      "alsa",
+      "speech mode."},
     CMDLN_EMPTY_OPTION
 };
 
