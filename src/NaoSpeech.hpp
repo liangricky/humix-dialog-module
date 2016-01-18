@@ -18,14 +18,14 @@
 #define SRC_NAOSPEECH_HPP_
 
 #include "nan.h"
+#include <alproxies/altexttospeechproxy.h>
 
 class NaoSpeech {
 public:
     static void sSay(const char* str);
-
-private:
     static void sInitNaoSpeech(const v8::FunctionCallbackInfo<v8::Value>& info);
 
+private:
     static AL::ALTextToSpeechProxy* sSpeechProxy;
     static uv_mutex_t sAlSpeechQueueMutex;
 };

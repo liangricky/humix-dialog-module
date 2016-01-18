@@ -14,11 +14,10 @@
 * limitations under the License.
 *******************************************************************************/
 
-#include <alproxies/altexttospeechproxy.h>
 #include "NaoSpeech.hpp"
 
-static AL::ALTextToSpeechProxy* NaoSpeech::sSpeechProxy = NULL;
-static uv_mutex_t NaoSpeech::sAlSpeechQueueMutex;
+AL::ALTextToSpeechProxy* NaoSpeech::sSpeechProxy = NULL;
+uv_mutex_t NaoSpeech::sAlSpeechQueueMutex;
 
 /*static*/
 void NaoSpeech::sInitNaoSpeech(const v8::FunctionCallbackInfo<v8::Value>& info) {
@@ -90,8 +89,6 @@ void InitModule(v8::Local<v8::Object> target) {
     v8::Isolate* isolate = v8::Isolate::GetCurrent();
     Nan::HandleScope scope;
     v8::Local<v8::Context> ctx = isolate->GetCurrentContext();
-
-    v8::Local<v8::FunctionTemplate> ft = HumixSpeech::sFunctionTemplate(isolate);
 
     target->Set(ctx, Nan::New("initNaoSpeech").ToLocalChecked(),
             v8::Function::New(ctx, NaoSpeech::sInitNaoSpeech, v8::Local<v8::Value>(), 0).ToLocalChecked());

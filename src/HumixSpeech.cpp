@@ -297,7 +297,7 @@ HumixSpeech::SayYes() {
         WavPlayer player(mWavSay);
         player.Play();
     } else if ( mSpeech == kNao) {
-        static char* yes = { 0xe6, 0x98, 0xaf, 0 };
+        static char yes[] = "\xe6\x98\xaf";
         NaoSpeech::sSay(yes);
     }
 }
