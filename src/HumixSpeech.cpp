@@ -70,6 +70,10 @@ static const arg_t cont_args_def[] = {
      ARG_STRING,
      "./voice/interlude/bye.wav",
      "the wave file of goodbye."},
+    {"-keyword-name",
+      ARG_STRING,
+      "HUMIX",
+      "keyword of the name."},
     {"-lang",
      ARG_STRING,
      "zh-tw",
@@ -325,6 +329,9 @@ void HumixSpeech::sLoop(void* arg) {
     int waitCount = 0;
     int humixCount = 0;
     int samprate = (int) cmd_ln_float32_r(_this->mConfig, "-samprate");
+    const char* keywordName = cmd_ln_str_r(_this->mConfig, "-keyword-name");
+
+    printf("keyword-name:%s\n", keywordName);
 
     WavWriter *wavWriter = NULL;
     setbuf(stdout, NULL);
@@ -371,7 +378,7 @@ void HumixSpeech::sLoop(void* arg) {
                 humixCount = 0;
                 if (in_speech) {
                     _this->mState = kKeyword;
-                    printf("Waiting for keyward: HUMIX...\n");
+                    printf("Waiting for keyward: %s...\n", keywordName);
                 }
                 break;
             case kKeyword:
@@ -381,12 +388,12 @@ void HumixSpeech::sLoop(void* arg) {
                     //keyword done
                     ps_end_utt(ps);
                     hyp = ps_get_hyp(ps, NULL);
-                    if (hyp != NULL && strcmp("HUMIX", hyp) == 0) {
+                    if (hyp != NULL && strcmp(keywordName, hyp) == 0) {
                         _this->mState = kWaitCommand;
                         if (_this->mStreamTTS ) {
                             _this->mStreamTTS->WSConnect();
                         }
-                        printf("keyword HUMIX found\n");
+                        printf("keyword %s found\n", keywordName);
                         ad_stop_rec(ad);
                         {
                             WavPlayer player(_this->mWavSay);
