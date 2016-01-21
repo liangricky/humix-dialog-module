@@ -70,6 +70,10 @@ static const arg_t cont_args_def[] = {
      ARG_STRING,
      "./voice/interlude/bye.wav",
      "the wave file of goodbye."},
+    {"-keyword-name",
+      ARG_STRING,
+      "HUMIX",
+      "keyword of the name."},
     {"-lang",
      ARG_STRING,
      "zh-tw",
@@ -104,7 +108,7 @@ HumixSpeech::HumixSpeech(const v8::FunctionCallbackInfo<v8::Value>& args)
 
     mCMDProc = sGetObjectPropertyAsString(ctx, config, "cmdproc", "./util/processcmd.sh");
     mWavSay =  sGetObjectPropertyAsString(ctx, config, "wav-say", "./voice/interlude/pleasesay1.wav");
-    mWavProc =  sGetObjectPropertyAsString(ctx, config, "wav-say", "./voice/interlude/process1.wav");
+    mWavProc =  sGetObjectPropertyAsString(ctx, config, "wav-proc", "./voice/interlude/process1.wav");
     mWavBye =  sGetObjectPropertyAsString(ctx, config, "wav-bye", "./voice/interlude/bye.wav");
     mLang =  sGetObjectPropertyAsString(ctx, config, "lang", "zh-tw");
     mSampleRate =  sGetObjectPropertyAsString(ctx, config, "samprate", "16000");
@@ -325,8 +329,12 @@ void HumixSpeech::sLoop(void* arg) {
     int waitCount = 0;
     int humixCount = 0;
     int samprate = (int) cmd_ln_float32_r(_this->mConfig, "-samprate");
+    const char* keywordName = cmd_ln_str_r(_this->mConfig, "-keyword-name");
+
+    printf("keyword-name:%s\n", keywordName);
 
     WavWriter *wavWriter = NULL;
+    setbuf(stdout, NULL);
 
     if ((ad = ad_open_dev(cmd_ln_str_r(_this->mConfig, "-adcdev"), samprate)) == NULL) {
         E_FATAL("Failed to open audio device\n");
@@ -348,7 +356,8 @@ void HumixSpeech::sLoop(void* arg) {
             if (!_this->mAplayFiles.empty()) {
                 ad_stop_rec(ad);
                 std::string file = _this->mAplayFiles.front();
-                printf("receive aplay command:%s\n", file.c_str());
+                _this->mAplayFiles.pop();
+                printf("play:%s\n", file.c_str());
                 {
                     WavPlayer player(file.c_str());
                     player.Play();
@@ -369,7 +378,7 @@ void HumixSpeech::sLoop(void* arg) {
                 humixCount = 0;
                 if (in_speech) {
                     _this->mState = kKeyword;
-                    printf("Waiting for keyward: HUMIX... \n");
+                    printf("Waiting for keyward: %s...\n", keywordName);
                 }
                 break;
             case kKeyword:
@@ -379,13 +388,12 @@ void HumixSpeech::sLoop(void* arg) {
                     //keyword done
                     ps_end_utt(ps);
                     hyp = ps_get_hyp(ps, NULL);
-                    if (hyp != NULL && strcmp("HUMIX", hyp) == 0) {
+                    if (hyp != NULL && strcmp(keywordName, hyp) == 0) {
                         _this->mState = kWaitCommand;
                         if (_this->mStreamTTS ) {
                             _this->mStreamTTS->WSConnect();
                         }
-                        printf("keyword HUMIX found\n");
-                        fflush(stdout);
+                        printf("keyword %s found\n", keywordName);
                         ad_stop_rec(ad);
                         {
                             WavPlayer player(_this->mWavSay);
@@ -407,6 +415,7 @@ void HumixSpeech::sLoop(void* arg) {
                     printf("Listening the command...\n");
                     _this->mState = kCommand;
                     if ( _this->mStreamTTS ) {
+                        _this->mStreamTTS->ReConnectIfNeeded();
                         _this->mStreamTTS->SendVoiceWav((char*) adbuf, (uint32_t) (k * 2));
                     } else {
                         wavWriter = new WavWriter("/dev/shm/test.wav", 1, samprate);
@@ -427,6 +436,12 @@ void HumixSpeech::sLoop(void* arg) {
                             if (_this->mStreamTTS ) {
                                 _this->mStreamTTS->Stop();
                             }
+                            ad_stop_rec(ad);
+                            {
+                                WavPlayer player(_this->mWavBye);
+                                player.Play();
+                            }
+                            ad_start_rec(ad);
                             printf("READY....\n");
                         } else {
                             printf(".");

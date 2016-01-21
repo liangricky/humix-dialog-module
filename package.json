@@ -23,10 +23,12 @@
     "logule": "^2.0.1",
     "nats": "^0.2.9",
     "soap": "^0.9.1",
-    "watson-developer-cloud": "^1.1.2"
+    "watson-developer-cloud": "^1.1.2",
+    "node-humix-sense": "^1.0.0"
   },
   "devDependencies": {
     "nan": "^2.1.0",
     "node-gyp": "^3.2.1"
-  }
+  },
+  "engines" : { "node" : ">=4.2" }
 }

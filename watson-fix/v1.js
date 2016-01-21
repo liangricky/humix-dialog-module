@@ -399,13 +399,10 @@ function RecognizeStream(options){
     'continuous': false,
     'interim_results': true
   }, pick(options, PARAMS_ALLOWED));
-  console.error(JSON.stringify(openingMessage));
 
   var closingMessage = {action: 'stop'};
 
   var url = options.base_url.replace(/^http/, 'ws') + '/v1/recognize?' + qs.stringify(queryParams);
-
-  console.error('url:', url);
 
   this.listening = false;
 

@@ -18,25 +18,25 @@
 
 
 void WavWriter::WriteHeader() {
-    ofs.write(mRIFFMarker, 4);
-    ofs.write((char*) &mFileSize, 4);
-    ofs.write(mFiletypeHeader, 4);
-    ofs.write(mFormatMarker, 4);
-    ofs.write((char*) &mDataHeaderLength, 4);
-    ofs.write((char*) &mFormatType, 2);
-    ofs.write((char*) &mNumberOfChannels, 2);
-    ofs.write((char*) &mSampleRate, 4);
-    ofs.write((char*) &mBytesPerSecond, 4);
-    ofs.write((char*) &mBytesPerFrame, 2);
-    ofs.write((char*) &mBitsPerSample, 2);
-    ofs.write("data", 4);
+    mOut.write(mRIFFMarker, 4);
+    mOut.write((char*) &mFileSize, 4);
+    mOut.write(mFiletypeHeader, 4);
+    mOut.write(mFormatMarker, 4);
+    mOut.write((char*) &mDataHeaderLength, 4);
+    mOut.write((char*) &mFormatType, 2);
+    mOut.write((char*) &mNumberOfChannels, 2);
+    mOut.write((char*) &mSampleRate, 4);
+    mOut.write((char*) &mBytesPerSecond, 4);
+    mOut.write((char*) &mBytesPerFrame, 2);
+    mOut.write((char*) &mBitsPerSample, 2);
+    mOut.write("data", 4);
 
     uint32_t data_size = mFileSize - 36;
-    ofs.write((char*) &data_size, 4);
+    mOut.write((char*) &data_size, 4);
 }
 
 void WavWriter::WriteData(const char* data, size_t size) {
-    ofs.write(data, size);
+    mOut.write(data, size);
     mFileSize += size;
 }
 

@@ -45,7 +45,7 @@ public:
         mBytesPerFrame = channel * 16 / 8;
         mBitsPerSample = 16;
         mFilename = strdup(filename);
-        ofs.open(mFilename, std::ofstream::out | std::ofstream::trunc);
+        mOut.open(mFilename, std::ofstream::out | std::ofstream::trunc);
     }
 
     /**
@@ -55,14 +55,14 @@ public:
     ~WavWriter() {
         if (mFileSize > 36) {
             //modify the fie size field
-            ofs.seekp(4);
-            ofs.write((char*) &mFileSize, 4);
+            mOut.seekp(4);
+            mOut.write((char*) &mFileSize, 4);
 
-            ofs.seekp(40);
+            mOut.seekp(40);
             uint32_t data_size = mFileSize - 36;
-            ofs.write((char*) &data_size, 4);
+            mOut.write((char*) &data_size, 4);
         }
-        ofs.close();
+        mOut.close();
         free(mFilename);
     }
 
@@ -89,7 +89,7 @@ private:
     uint32_t mBytesPerSecond;
     uint16_t mBytesPerFrame;
     uint16_t mBitsPerSample;
-    std::ofstream ofs;
+    std::ofstream mOut;
 };
 
 /**
