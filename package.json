@@ -9,6 +9,7 @@
     "url": "https://github.com/project-humix/humix-sense-speech.git"
   },
   "scripts": {
+    "preinstall": "scripts/preinstall",
     "install": "make"
   },
   "keywords": [
