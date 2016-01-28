@@ -3,7 +3,8 @@ speech-to-text and text-to-speech enabling project for Humix
 
 # dependencies:
 - nodejs >= 4.2
-- gcc >= 4.8
+- gcc >= 4.8  
+  instructions could be found here https://somewideopenspace.wordpress.com/2014/02/28/gcc-4-8-on-raspberry-pi-wheezy/
 - packages
     - sudo apt-get install bison
     - sudo apt-get install libasound2-dev
@@ -23,4 +24,4 @@ speech-to-text and text-to-speech enabling project for Humix
 Make sure **gnatsd** server is running and you are on the project's root folder. Then issue the following command:
 ```
     node .
-```
+```h
